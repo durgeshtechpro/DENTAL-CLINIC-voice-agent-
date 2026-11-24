@@ -28,5 +28,8 @@ recordings/
 clinic/clinic.db
 clinic/webhooks.log
 
+# Call API database
+api/calls.db
+
 # Local notes
 memory_context.md

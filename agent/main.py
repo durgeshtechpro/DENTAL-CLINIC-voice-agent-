@@ -1,5 +1,7 @@
+import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from livekit import agents
@@ -92,14 +94,123 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
 
+# Read the room metadata string, or an empty string when the room has none.
+def room_metadata(ctx: agents.JobContext) -> str:
+    try:
+        live = getattr(ctx.room, "metadata", "") or ""
+    except Exception:
+        live = ""
+    if isinstance(live, str) and live.strip():
+        return live
+    try:
+        stored = getattr(ctx.job.room, "metadata", "") or ""
+    except Exception:
+        return ""
+    return stored if isinstance(stored, str) else ""
+
+
+# Keep a positive number from metadata, or None when the value is unusable.
+def positive_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return float(value)
+
+
+# Keep a tool config only when it has the fields the HTTP tool builder needs.
+def usable_tool(item: object) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    http = item.get("http")
+    name = item.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if not isinstance(item.get("description"), str) or not isinstance(item.get("parameters"), dict):
+        return None
+    if not isinstance(http, dict):
+        return None
+    method = http.get("method")
+    url = http.get("url")
+    timeout = http.get("timeoutMs")
+    if not isinstance(method, str) or not method.strip() or not isinstance(url, str) or not url.strip():
+        return None
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
+        return None
+    return item
+
+
+# Use the room config when it is valid, and the built-in defaults otherwise.
+def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any], list[Any]]:
+    instructions = front_desk_instructions()
+    greeting = str(CALL_CONFIG["greeting"])
+    lifecycle = {
+        "maxDurationSeconds": CALL_CONFIG["maxDurationSeconds"],
+        "inactivity": dict(CALL_CONFIG["inactivity"]),
+    }
+    tools: list[Any] = [*TOOLS, end_call]
+    try:
+        raw = room_metadata(ctx).strip()
+        if not raw:
+            return instructions, greeting, lifecycle, tools
+        parsed = json.loads(raw)
+        config = parsed.get("config") if isinstance(parsed, dict) else None
+        if not isinstance(config, dict):
+            return instructions, greeting, lifecycle, tools
+        prompt = config.get("systemPrompt")
+        if isinstance(prompt, str) and prompt.strip():
+            instructions = prompt
+        greet = config.get("greeting")
+        if isinstance(greet, str) and greet.strip():
+            greeting = greet
+        max_seconds = positive_number(config.get("maxDurationSeconds"))
+        if max_seconds is not None:
+            lifecycle["maxDurationSeconds"] = max_seconds
+        inactivity = config.get("inactivity")
+        if isinstance(inactivity, dict):
+            merged = dict(CALL_CONFIG["inactivity"])
+            after = positive_number(inactivity.get("afterSeconds"))
+            hang_after = positive_number(inactivity.get("hangUpAfterSeconds"))
+            message = inactivity.get("message")
+            if after is not None:
+                merged["afterSeconds"] = after
+            if hang_after is not None:
+                merged["hangUpAfterSeconds"] = hang_after
+            if isinstance(message, str) and message.strip():
+                merged["message"] = message
+            if float(merged["hangUpAfterSeconds"]) >= float(merged["afterSeconds"]):
+                lifecycle["inactivity"] = merged
+        if isinstance(config.get("tools"), list):
+            built: list[Any] = []
+            for item in config["tools"]:
+                tool_config = usable_tool(item)
+                if tool_config is None:
+                    continue
+                try:
+                    built.append(build_http_tool(tool_config))
+                except Exception:
+                    continue
+            tools = [*built, end_call]
+    except Exception:
+        return (
+            front_desk_instructions(),
+            str(CALL_CONFIG["greeting"]),
+            {
+                "maxDurationSeconds": CALL_CONFIG["maxDurationSeconds"],
+                "inactivity": dict(CALL_CONFIG["inactivity"]),
+            },
+            [*TOOLS, end_call],
+        )
+    return instructions, greeting, lifecycle, tools
+
+
 class Assistant(Agent):
-    # Give this call today's instructions and the clinic tools.
-    def __init__(self) -> None:
-        super().__init__(instructions=front_desk_instructions(), tools=[*TOOLS, end_call])
+    # Give this call its instructions and tools.
+    def __init__(self, instructions: str, tools: list[Any]) -> None:
+        super().__init__(instructions=instructions, tools=tools)
 
 
 # Open one voice session, then speak the greeting before the caller talks.
 async def entrypoint(ctx: agents.JobContext) -> None:
+    instructions, greeting, lifecycle_config, tools = settings_from_room(ctx)
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", language="en"),
         llm=groq.LLM(model="openai/gpt-oss-20b", reasoning_effort="low"),
@@ -108,12 +219,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         turn_handling=TurnHandlingOptions(turn_detection=MultilingualModel()),
         user_away_timeout=None,
     )
-    watch = CallLifecycle(session, CALL_CONFIG)
+    watch = CallLifecycle(session, lifecycle_config)
     session.userdata = watch
-    await session.start(room=ctx.room, agent=Assistant())
+    await session.start(room=ctx.room, agent=Assistant(instructions, tools))
     watch.start()
     log_call("greeting")
-    await session.say(str(CALL_CONFIG["greeting"]))
+    await session.say(greeting)
 
 
 server = AgentServer(setup_fnc=prewarm)
