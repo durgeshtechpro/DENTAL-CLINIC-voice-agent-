@@ -7,9 +7,20 @@ from livekit.agents import Agent, AgentServer, AgentSession, JobProcess, TurnHan
 from livekit.plugins import cartesia, deepgram, groq, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from lifecycle import CallLifecycle, end_call, log_call
 from tools import build_http_tool
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+CALL_CONFIG = {
+    "greeting": "Hi, this is Bright Smile Dental. How can I help?",
+    "maxDurationSeconds": 600,
+    "inactivity": {
+        "afterSeconds": 8,
+        "message": "Are you still there?",
+        "hangUpAfterSeconds": 20,
+    },
+}
 
 TOOL_CONFIGS = [
     {
@@ -58,7 +69,6 @@ TOOL_CONFIGS = [
     },
 ]
 TOOLS = [build_http_tool(config) for config in TOOL_CONFIGS]
-GREETING = "Hi, this is Bright Smile Dental. How can I help?"
 
 
 # Build the front-desk instructions with today's real date and weekday.
@@ -72,7 +82,8 @@ def front_desk_instructions() -> str:
         "Before booking, ask for the patient's name and phone number. "
         "Say times like 'ten AM', not '10:00'. "
         "Never read raw JSON or error codes to the caller. "
-        "If a booking fails because the slot is taken, say so and offer the alternatives."
+        "If a booking fails because the slot is taken, say so and offer the alternatives. "
+        "When the caller says goodbye or has nothing more to ask, say a short goodbye and call end_call."
     )
 
 
@@ -84,7 +95,7 @@ def prewarm(proc: JobProcess) -> None:
 class Assistant(Agent):
     # Give this call today's instructions and the clinic tools.
     def __init__(self) -> None:
-        super().__init__(instructions=front_desk_instructions(), tools=TOOLS)
+        super().__init__(instructions=front_desk_instructions(), tools=[*TOOLS, end_call])
 
 
 # Open one voice session, then speak the greeting before the caller talks.
@@ -95,9 +106,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         tts=cartesia.TTS(),
         vad=ctx.proc.userdata["vad"],
         turn_handling=TurnHandlingOptions(turn_detection=MultilingualModel()),
+        user_away_timeout=None,
     )
+    watch = CallLifecycle(session, CALL_CONFIG)
+    session.userdata = watch
     await session.start(room=ctx.room, agent=Assistant())
-    await session.say(GREETING)
+    watch.start()
+    log_call("greeting")
+    await session.say(str(CALL_CONFIG["greeting"]))
 
 
 server = AgentServer(setup_fnc=prewarm)
