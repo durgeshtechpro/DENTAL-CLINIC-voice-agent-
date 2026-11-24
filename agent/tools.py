@@ -8,6 +8,8 @@ import httpx
 from livekit.agents import RunContext, function_tool
 from livekit.agents.llm import RawFunctionTool
 
+from recorder import report_tool_call
+
 FILLER_PHRASES = (
     "Let me check that for you.",
     "One moment while I look that up.",
@@ -64,6 +66,7 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
             f"{stamp} tool={config['name']} args={json.dumps(raw_arguments)} "
             f"result={text} duration_ms={duration_ms}"
         )
+        report_tool_call(ctx.session, config["name"], raw_arguments, payload, duration_ms)
         return text
 
     return function_tool(call_tool, raw_schema=schema)

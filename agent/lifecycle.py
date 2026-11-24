@@ -38,6 +38,8 @@ class CallLifecycle:
         self._tools = 0
         self._in_prompt = False
         self.closing = False
+        self.hangup_reason: str | None = None
+        self.recorder: object | None = None
         self._task: asyncio.Task[None] | None = None
 
     # Start the background watch and listen for tool calls.
@@ -147,6 +149,7 @@ class CallLifecycle:
     def hang_up(self, reason: str) -> None:
         if self.closing:
             return
+        self.hangup_reason = reason
         self.closing = True
         duration = time.monotonic() - self._started
         log_call(f"hang-up reason={reason} duration_s={duration:.1f}")

@@ -29,15 +29,35 @@ def init_db() -> None:
                 room_name TEXT,
                 created_at TEXT NOT NULL,
                 started_at TEXT,
-                ended_at TEXT
+                ended_at TEXT,
+                duration_seconds REAL,
+                result_json TEXT
             )
             """
         )
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(calls)").fetchall()
+        }
+        if "duration_seconds" not in columns:
+            connection.execute("ALTER TABLE calls ADD COLUMN duration_seconds REAL")
+        if "result_json" not in columns:
+            connection.execute("ALTER TABLE calls ADD COLUMN result_json TEXT")
     finally:
         connection.close()
 
 
-# Turn one database row into the JSON shape the API returns.
+# Read the saved call result, or None when it has not arrived.
+def stored_result(row: sqlite3.Row) -> dict[str, Any] | None:
+    raw = row["result_json"]
+    if not raw:
+        return None
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+# Turn one database row into the short JSON shape used by the call list.
 def row_to_call(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -46,8 +66,20 @@ def row_to_call(row: sqlite3.Row) -> dict[str, Any]:
         "createdAt": row["created_at"],
         "startedAt": row["started_at"],
         "endedAt": row["ended_at"],
-        "durationSeconds": None,
+        "durationSeconds": row["duration_seconds"],
     }
+
+
+# Turn one database row into the full call, including the transcript when it exists.
+def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
+    result = stored_result(row)
+    detail = row_to_call(row)
+    detail["transcript"] = None if result is None else result.get("transcript")
+    detail["toolCalls"] = None if result is None else result.get("toolCalls")
+    detail["turnMetrics"] = None if result is None else result.get("turnMetrics")
+    detail["usage"] = None if result is None else result.get("usage")
+    detail["hangupReason"] = None if result is None else result.get("hangupReason")
+    return detail
 
 
 # Save a new call and return the stored record.
@@ -85,7 +117,7 @@ def get_call(call_id: str) -> dict[str, Any] | None:
         connection.close()
     if row is None:
         return None
-    return row_to_call(row)
+    return row_to_call_detail(row)
 
 
 # Read every call, newest first.
@@ -135,6 +167,41 @@ def room_name_for(call_id: str) -> str | None:
     if row is None or row["room_name"] is None:
         return None
     return str(row["room_name"])
+
+
+# Store the call result and mark the call completed.
+def save_result(call_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
+    if get_call(call_id) is None:
+        return None
+    connection = connect()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                """
+                UPDATE calls
+                SET status = 'completed',
+                    started_at = ?,
+                    ended_at = ?,
+                    duration_seconds = ?,
+                    result_json = ?
+                WHERE id = ?
+                """,
+                (
+                    result.get("startedAt"),
+                    result.get("endedAt"),
+                    result.get("durationSeconds"),
+                    json.dumps(result),
+                    call_id,
+                ),
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+    finally:
+        connection.close()
+    return get_call(call_id)
 
 
 # Remove a call when room setup fails before the caller receives it.

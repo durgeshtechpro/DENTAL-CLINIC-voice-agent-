@@ -10,6 +10,7 @@ from livekit.plugins import cartesia, deepgram, groq, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from lifecycle import CallLifecycle, end_call, log_call
+from recorder import CallRecorder
 from tools import build_http_tool
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -107,6 +108,21 @@ def room_metadata(ctx: agents.JobContext) -> str:
     except Exception:
         return ""
     return stored if isinstance(stored, str) else ""
+
+
+# Read the call id from room metadata, or None for a console call.
+def call_id_from_room(ctx: agents.JobContext) -> str | None:
+    try:
+        raw = room_metadata(ctx).strip()
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        call_id = parsed.get("id") if isinstance(parsed, dict) else None
+        if isinstance(call_id, str) and call_id.strip():
+            return call_id.strip()
+    except Exception:
+        return None
+    return None
 
 
 # Keep a positive number from metadata, or None when the value is unusable.
@@ -220,7 +236,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         user_away_timeout=None,
     )
     watch = CallLifecycle(session, lifecycle_config)
+    recorder = CallRecorder(call_id_from_room(ctx))
+    watch.recorder = recorder
     session.userdata = watch
+    recorder.attach(session)
+    recorder.watch_room(ctx.room)
+
+    # Save the transcript after the session closes, even if the close event was missed.
+    async def save_call_result(_reason: str = "") -> None:
+        await recorder.wait_saved()
+
+    ctx.add_shutdown_callback(save_call_result)
     await session.start(room=ctx.room, agent=Assistant(instructions, tools))
     watch.start()
     log_call("greeting")

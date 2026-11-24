@@ -14,7 +14,16 @@ from fastapi.responses import JSONResponse
 from livekit import api
 from pydantic import BaseModel, Field, model_validator
 
-from api.db import delete_call, get_call, init_db, insert_call, list_calls, mark_ended, room_name_for
+from api.db import (
+    delete_call,
+    get_call,
+    init_db,
+    insert_call,
+    list_calls,
+    mark_ended,
+    room_name_for,
+    save_result,
+)
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -43,6 +52,50 @@ class InactivityConfig(BaseModel):
         if self.hangUpAfterSeconds < self.afterSeconds:
             raise ValueError("hangUpAfterSeconds must be greater than or equal to afterSeconds")
         return self
+
+
+class UsageResult(BaseModel):
+    sttAudioSeconds: float = Field(ge=0)
+    llmPromptTokens: int = Field(ge=0)
+    llmCompletionTokens: int = Field(ge=0)
+    ttsCharacters: int = Field(ge=0)
+
+
+class TranscriptTurn(BaseModel):
+    role: Literal["user", "agent"]
+    text: str
+    timestamp: str
+    offsetSeconds: float = Field(ge=0)
+
+
+class ToolCallResult(BaseModel):
+    name: str
+    arguments: Any = None
+    result: Any = None
+    durationMs: float = Field(ge=0)
+    timestamp: str
+
+
+class TurnMetricResult(BaseModel):
+    turnIndex: int = Field(ge=0)
+    endOfTurnDelayMs: float | None = None
+    llmTtftMs: float | None = None
+    ttsTtfbMs: float | None = None
+    totalMs: float | None = None
+    usedTool: bool
+
+
+class CallResultRequest(BaseModel):
+    transcript: list[TranscriptTurn]
+    toolCalls: list[ToolCallResult]
+    turnMetrics: list[TurnMetricResult]
+    usage: UsageResult
+    startedAt: str = Field(min_length=1)
+    endedAt: str = Field(min_length=1)
+    durationSeconds: float = Field(ge=0)
+    hangupReason: Literal[
+        "goodbye", "inactivity", "max_duration", "caller_disconnected", "api_end"
+    ] | None = None
 
 
 class CreateCallRequest(BaseModel):
@@ -221,7 +274,19 @@ async def end_call(call_id: str) -> JSONResponse:
         except Exception:
             return _error(502, "could not delete the room")
 
+    if record["status"] == "completed":
+        return JSONResponse(status_code=200, content=record)
+
     updated = mark_ended(call_id)
+    if updated is None:
+        return _error(404, "not found")
+    return JSONResponse(status_code=200, content=updated)
+
+
+# Save the transcript and metrics collected for one call.
+@app.post("/calls/{call_id}/result", dependencies=[Depends(require_api_key)])
+async def save_call_result(call_id: str, body: CallResultRequest) -> JSONResponse:
+    updated = save_result(call_id, body.model_dump())
     if updated is None:
         return _error(404, "not found")
     return JSONResponse(status_code=200, content=updated)

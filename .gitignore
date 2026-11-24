@@ -31,5 +31,8 @@ clinic/webhooks.log
 # Call API database
 api/calls.db
 
+# Saved call transcripts
+data/call-logs/
+
 # Local notes
 memory_context.md
