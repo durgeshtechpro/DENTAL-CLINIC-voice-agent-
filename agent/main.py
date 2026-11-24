@@ -83,6 +83,8 @@ def front_desk_instructions() -> str:
         f"Today is {today.strftime('%A')}, {today.isoformat()}. "
         "Convert words like tomorrow or Friday to YYYY-MM-DD yourself. "
         "Before booking, ask for the patient's name and phone number. "
+        "Never call book_slot until the caller has told you their name and phone number in this conversation. "
+        "Never invent, guess or use placeholder values. If you do not have both, ask for them first. "
         "Say times like 'ten AM', not '10:00'. "
         "Never read raw JSON or error codes to the caller. "
         "If a booking fails because the slot is taken, say so and offer the alternatives. "

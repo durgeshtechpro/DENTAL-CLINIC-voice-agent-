@@ -16,6 +16,7 @@ from clinic.db import book_slot, free_slots, init_db
 WEBHOOK_LOG = Path(__file__).resolve().parent / "webhooks.log"
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
+PLACEHOLDER_WORDS = ("placeholder", "unknown", "n/a", "name", "test", "none", "null")
 
 
 # Create the database before the server accepts requests, then close nothing extra.
@@ -71,15 +72,6 @@ class BookRequest(BaseModel):
         datetime.strptime(value, "%H:%M")
         return value
 
-    # Reject a blank patient name or phone number.
-    @field_validator("name", "phone")
-    @classmethod
-    def not_blank(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("must not be blank")
-        return cleaned
-
 
 # List the free appointment times for one date.
 @app.post("/slots")
@@ -91,14 +83,53 @@ async def list_slots(
     return {"date": body.date, "slots": free_slots(body.date)}
 
 
+# Explain why a patient name cannot be booked, or return None when it is acceptable.
+def name_problem(name: str) -> str | None:
+    cleaned = name.strip()
+    if len(cleaned) < 2:
+        return "Name must be at least 2 characters."
+    if not any(character.isalpha() for character in cleaned):
+        return "Name must include letters."
+    if any(character in "[]{}<>" for character in cleaned):
+        return "Name looks like a placeholder."
+    lowered = cleaned.casefold()
+    if any(word in lowered for word in PLACEHOLDER_WORDS):
+        return "Name looks like a placeholder."
+    return None
+
+
+# Explain why a phone number cannot be booked, or return None when it is acceptable.
+def phone_problem(phone: str) -> str | None:
+    cleaned = phone.strip().replace(" ", "").replace("-", "")
+    if cleaned.startswith("+"):
+        cleaned = cleaned[1:]
+    if re.fullmatch(r"\d{10,13}", cleaned) is None:
+        return "Phone must be 10 to 13 digits."
+    return None
+
+
 # Book one slot, or say it is taken or missing.
 @app.post("/book")
 async def book(
     body: BookRequest,
     delay_ms: int = Query(default=0, ge=0),
 ) -> JSONResponse:
+    name = body.name.strip()
+    phone = body.phone.strip()
+    name_message = name_problem(name)
+    if name_message is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"status": "invalid_input", "field": "name", "message": name_message},
+        )
+    phone_message = phone_problem(phone)
+    if phone_message is not None:
+        return JSONResponse(
+            status_code=422,
+            content={"status": "invalid_input", "field": "phone", "message": phone_message},
+        )
     await wait_if_requested(delay_ms)
-    result = book_slot(body.date, body.time, body.name, body.phone)
+    result = book_slot(body.date, body.time, name, phone)
     status = result["status"]
     if status == "booked":
         return JSONResponse(

@@ -52,6 +52,16 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
                     payload["note"] = TAKEN_NOTE
                 else:
                     payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
+            elif response.status_code == 422:
+                payload = response.json()
+                if isinstance(payload, dict) and payload.get("status") == "invalid_input":
+                    field = payload.get("field") or "detail"
+                    payload["note"] = (
+                        "Do not retry with made-up values. "
+                        f"Ask the caller for the correct {field}."
+                    )
+                else:
+                    payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
             else:
                 payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
         except httpx.TimeoutException:
