@@ -16,6 +16,20 @@ MAX_DURATION_GOODBYE = (
 )
 INACTIVITY_GOODBYE = "Goodbye."
 FALLBACK_GOODBYE = "Thanks for calling. Goodbye."
+NOT_GOODBYE_NOTE = (
+    "The caller has not said goodbye. Do not end the call. Continue the conversation."
+)
+# Phrases that mean the caller is done. Checked on the last finished caller line only.
+_GOODBYE_PHRASES = (
+    "goodbye",
+    "bye",
+    "that's all",
+    "that is all",
+    "nothing else",
+    "no thanks",
+    "see you",
+    "have a good day",
+)
 
 
 # Print one call event with the current time.
@@ -171,12 +185,13 @@ class CallLifecycle:
         self._session.shutdown(drain=True)
 
 
-# End the call only after the goodbye has finished and the caller is quiet.
+# End the call only after the caller has said goodbye and the goodbye has finished.
 @function_tool(
     name="end_call",
     description=(
-        "End the call. Say a short goodbye in this same reply, then call this tool. "
-        "Do not call it while the caller is still speaking."
+        "End the call only after the caller clearly says goodbye or that they need nothing else. "
+        "Say a short goodbye in this same reply, then call this tool. "
+        "Never call it while you are waiting for information or while the caller is still speaking."
     ),
 )
 async def end_call(ctx: RunContext) -> str | None:
@@ -185,6 +200,9 @@ async def end_call(ctx: RunContext) -> str | None:
         return "The call cannot be ended right now."
     if watch.closing or ctx.session.user_state == "speaking":
         return "The caller is still speaking. Do not end the call."
+    if not _caller_said_goodbye(ctx.session):
+        log_call("end_call blocked: caller has not said goodbye")
+        return NOT_GOODBYE_NOTE
     try:
         ctx.speech_handle.allow_interruptions = False
     except RuntimeError:
@@ -195,6 +213,38 @@ async def end_call(ctx: RunContext) -> str | None:
 
     ctx.speech_handle.add_done_callback(_on_done)
     return None
+
+
+# True when the caller's last finished line contains a goodbye phrase.
+def _caller_said_goodbye(session: AgentSession) -> bool:
+    text = _latest_user_text(session)
+    spoken = _normalize_speech(text)
+    if not spoken:
+        return False
+    return any(phrase in spoken for phrase in _GOODBYE_PHRASES)
+
+
+# The caller's most recent finished sentence, or an empty string.
+def _latest_user_text(session: AgentSession) -> str:
+    for message in reversed(session.history.messages()):
+        if getattr(message, "role", None) != "user":
+            continue
+        text = (message.text_content or "").strip()
+        if text:
+            return text
+    return ""
+
+
+# Lowercase the line and turn punctuation into spaces so phrase checks stay simple.
+def _normalize_speech(text: str) -> str:
+    cleaned = text.lower().replace("\u2019", "'").replace("`", "'")
+    letters = []
+    for ch in cleaned:
+        if ch.isalnum() or ch in {"'", " "}:
+            letters.append(ch)
+        else:
+            letters.append(" ")
+    return " ".join("".join(letters).split())
 
 
 # Hang up after this turn's goodbye, or say one if the model stayed silent.

@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 from livekit import rtc
+
+from http_client import get_http_client
 from livekit.agents import AgentSession, ChatMessage
 from livekit.agents.metrics import EOUMetrics, LLMMetrics, STTMetrics, TTSMetrics
 from livekit.agents.voice.events import (
@@ -187,6 +189,15 @@ class CallRecorder:
         )
         self._used_tool = True
 
+    # The caller's last few finished lines, oldest first.
+    def recent_caller_lines(self, limit: int = 6) -> list[str]:
+        lines = [
+            str(row.get("text") or "").strip()
+            for row in self._transcript
+            if row.get("role") == "user" and str(row.get("text") or "").strip()
+        ]
+        return lines[-limit:]
+
     # Stop the clock and choose why the call ended.
     def finish(self, ev: CloseEvent | None) -> None:
         if self._finished:
@@ -276,9 +287,11 @@ class CallRecorder:
     async def _post(self, payload: dict[str, Any]) -> None:
         url = RESULT_URL.format(call_id=self.call_id)
         headers = {"X-API-Key": os.environ.get("API_KEY", "")}
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+        client = await get_http_client()
+        response = await client.post(
+            url, headers=headers, json=payload, timeout=httpx.Timeout(5.0)
+        )
+        response.raise_for_status()
 
     # Write the result JSON into data/call-logs.
     def _write(self, payload: dict[str, Any], name: str) -> None:
@@ -288,6 +301,21 @@ class CallRecorder:
             stamp = datetime.now(timezone.utc).strftime("%H%M%S%f")
             path = LOG_DIR / f"{path.stem}-{stamp}{path.suffix}"
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+# The caller's recent finished lines from the recorder on this session.
+def recent_caller_lines(session: AgentSession, limit: int = 6) -> list[str]:
+    try:
+        watch = session.userdata
+    except Exception:
+        return []
+    recorder = getattr(watch, "recorder", None)
+    if not isinstance(recorder, CallRecorder):
+        return []
+    try:
+        return recorder.recent_caller_lines(limit)
+    except Exception:
+        return []
 
 
 # Hand one finished tool call to the recorder attached to this session.

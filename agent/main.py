@@ -9,6 +9,7 @@ from livekit.agents import Agent, AgentServer, AgentSession, JobProcess, TurnHan
 from livekit.plugins import cartesia, deepgram, groq, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from http_client import get_http_client, open_http_client
 from lifecycle import CallLifecycle, end_call, log_call
 from recorder import CallRecorder
 from tools import build_http_tool
@@ -82,19 +83,23 @@ def front_desk_instructions() -> str:
         "Keep replies to one or two short sentences. You are on a phone call. "
         f"Today is {today.strftime('%A')}, {today.isoformat()}. "
         "Convert words like tomorrow or Friday to YYYY-MM-DD yourself. "
-        "Before booking, ask for the patient's name and phone number. "
+        "When the caller asks about available slots, answer with the slots first. Do NOT ask for name or phone yet. Ask for name and phone only after the caller has chosen a specific time. "
         "Never call book_slot until the caller has told you their name and phone number in this conversation. "
         "Never invent, guess or use placeholder values. If you do not have both, ask for them first. "
         "Say times like 'ten AM', not '10:00'. "
         "Never read raw JSON or error codes to the caller. "
         "If a booking fails because the slot is taken, say so and offer the alternatives. "
-        "When the caller says goodbye or has nothing more to ask, say a short goodbye and call end_call."
+        "Phone numbers have 10 digits. 'double N' means N twice and 'triple N' means N three times. "
+        "Before calling book_slot, read the phone number back digit by digit (for example: eight, three, seven, four, zero, one, one, six, three, four) and wait for the caller to say yes. Do not call book_slot before that yes. "
+        "Call end_call only after the caller clearly says goodbye or that they need nothing else. Never call it while you are waiting for information from the caller. "
+        "If a tool returns an error or mismatch, ALWAYS speak a short sentence to the caller before doing anything else. Never stay silent."
     )
 
 
-# Load the Silero speech detector once, before a call starts.
+# Load the speech detector and the shared HTTP client once, before a call starts.
 def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
+    open_http_client()
 
 
 # Read the room metadata string, or an empty string when the room has none.
@@ -228,6 +233,7 @@ class Assistant(Agent):
 
 # Open one voice session, then speak the greeting before the caller talks.
 async def entrypoint(ctx: agents.JobContext) -> None:
+    await get_http_client()
     instructions, greeting, lifecycle_config, tools = settings_from_room(ctx)
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", language="en"),

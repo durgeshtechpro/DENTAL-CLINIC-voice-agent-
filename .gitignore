@@ -36,3 +36,6 @@ data/call-logs/
 
 # Local notes
 memory_context.md
+
+# Web frontend secrets
+web/.env.local
