@@ -1,0 +1,19 @@
+---
+alwaysApply: true
+---
+
+# Project: Voice agent phone infrastructure (take-home assignment)
+
+## Stack
+- Python 3.12, LiveKit Agents, FastAPI, SQLite (later Postgres), httpx
+- Telephony: Twilio via LiveKit SIP
+- STT: Deepgram, LLM: Groq/OpenAI, TTS: Cartesia/Deepgram
+
+## Rules for you (Cursor)
+- The user is a beginner. Write simple, readable code with a short comment above each function explaining what it does in plain English.
+- Do ONLY what I ask in the current prompt. Do not create extra files, do not refactor unrelated code.
+- Never hardcode API keys. Read them from environment variables (.env). Keep .env.example updated.
+- Use type hints, async/await, and proper error handling with timeouts.
+- Add structured logging (print timestamps for each latency measurement).
+- After finishing, give a 5-line summary: which files changed, and how to run/test.
+- Before using any LiveKit/Deepgram/Twilio API, check the latest official docs; do not guess function names.

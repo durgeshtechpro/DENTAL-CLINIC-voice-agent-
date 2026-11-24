@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zoft-voice-agent"
+version = "0.1.0"
+description = "ZOFT clinic voice agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "livekit-agents",
+    "livekit-plugins-deepgram",
+    "livekit-plugins-groq",
+    "livekit-plugins-cartesia",
+    "livekit-plugins-silero",
+    "livekit-plugins-turn-detector",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "python-dotenv",
+    "pydantic",
+]
+
+[tool.setuptools]
+packages = []
