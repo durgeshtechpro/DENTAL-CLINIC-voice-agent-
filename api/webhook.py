@@ -125,6 +125,53 @@ def _http_url(url: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+# Middle value of the quiet times. Skip items that have no number.
+def _median_quiet_ms(items: Any) -> float | int | None:
+    times: list[float] = []
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = item.get("timeToQuietMs")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        times.append(float(value))
+    if not times:
+        return None
+    times.sort()
+    middle = len(times) // 2
+    if len(times) % 2 == 1:
+        median = times[middle]
+    else:
+        median = (times[middle - 1] + times[middle]) / 2
+    if median == int(median):
+        return int(median)
+    return median
+
+
+# Count real and false interruptions for the webhook.
+def interruption_summary(items: Any) -> dict[str, Any]:
+    rows = items if isinstance(items, list) else []
+    real = 0
+    false_resumed = 0
+    count = 0
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        count += 1
+        if item.get("kind") == "real":
+            real += 1
+        elif item.get("kind") == "false_resumed":
+            false_resumed += 1
+    return {
+        "count": count,
+        "real": real,
+        "falseResumed": false_resumed,
+        "medianTimeToQuietMs": _median_quiet_ms(rows),
+    }
+
+
 # Build the call.ended JSON body.
 def webhook_body(call_id: str, result: dict[str, Any], cost: dict[str, Any]) -> dict[str, Any]:
     transcript = result.get("transcript")
@@ -139,6 +186,7 @@ def webhook_body(call_id: str, result: dict[str, Any], cost: dict[str, Any]) -> 
         "transcriptTurns": len(transcript) if isinstance(transcript, list) else 0,
         "toolCalls": _public_tools(result.get("toolCalls")),
         "cost": cost,
+        "interruptions": interruption_summary(result.get("interruptions")),
         "summary": plain_summary(transcript),
     }
 

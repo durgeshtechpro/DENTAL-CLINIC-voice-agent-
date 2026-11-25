@@ -110,6 +110,16 @@ def stored_attempts(row: sqlite3.Row) -> list[dict[str, Any]]:
     return [item for item in parsed if isinstance(item, dict)]
 
 
+# Read saved interruptions, or an empty list when the result has none.
+def stored_interruptions(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(result, dict):
+        return []
+    raw = result.get("interruptions")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
 # Turn one database row into the full call, including the transcript when it exists.
 def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
     result = stored_result(row)
@@ -119,6 +129,7 @@ def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
     detail["turnMetrics"] = None if result is None else result.get("turnMetrics")
     detail["usage"] = None if result is None else result.get("usage")
     detail["hangupReason"] = None if result is None else result.get("hangupReason")
+    detail["interruptions"] = stored_interruptions(result)
     detail["cost"] = stored_cost(row, result)
     detail["webhookAttempts"] = stored_attempts(row)
     return detail

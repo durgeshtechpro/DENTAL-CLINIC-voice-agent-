@@ -12,16 +12,27 @@ from livekit import rtc
 from http_client import get_http_client
 from livekit.agents import AgentSession, ChatMessage
 from livekit.agents.metrics import EOUMetrics, LLMMetrics, STTMetrics, TTSMetrics
+from livekit.agents.inference.interruption import OverlappingSpeechEvent
 from livekit.agents.voice.events import (
+    AgentFalseInterruptionEvent,
+    AgentStateChangedEvent,
     CloseEvent,
     CloseReason,
     ConversationItemAddedEvent,
     MetricsCollectedEvent,
+    UserStateChangedEvent,
 )
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "call-logs"
 RESULT_URL = "http://127.0.0.1:8000/calls/{call_id}/result"
 HANGUP_REASONS = {"goodbye", "inactivity", "max_duration"}
+
+
+# Turn a SDK unix time into a UTC timestamp, or None when the SDK did not give one.
+def unix_stamp(unix: object) -> str | None:
+    if isinstance(unix, bool) or not isinstance(unix, (int, float)):
+        return None
+    return datetime.fromtimestamp(float(unix), timezone.utc).isoformat(timespec="milliseconds")
 
 
 # Turn a seconds value from the SDK into whole milliseconds, or None when it is missing.
@@ -66,6 +77,8 @@ class CallRecorder:
         self._transcript: list[dict[str, Any]] = []
         self._tool_calls: list[dict[str, Any]] = []
         self._turn_metrics: list[dict[str, Any]] = []
+        self._interruptions: list[dict[str, Any]] = []
+        self._open_interruption: dict[str, Any] | None = None
         self._stt_audio_seconds = 0.0
         self._llm_prompt_tokens = 0
         self._llm_completion_tokens = 0
@@ -86,6 +99,10 @@ class CallRecorder:
         self._session = session
         session.on("conversation_item_added", self._on_conversation_item)
         session.on("metrics_collected", self._on_metrics)
+        session.on("user_state_changed", self._on_user_state)
+        session.on("agent_state_changed", self._on_agent_state)
+        session.on("overlapping_speech", self._on_overlap)
+        session.on("agent_false_interruption", self._on_false_interruption)
         session.on("close", self._on_close)
 
     # Remember when the LiveKit room itself is deleted, which means the API ended the call.
@@ -110,6 +127,7 @@ class CallRecorder:
             return
         if item.role == "user":
             self._transcript.append(self._turn("user", text, item.created_at))
+            self._mark_real_interruption()
             if "end_of_turn_delay" in item.metrics:
                 delay = item.metrics["end_of_turn_delay"]
                 if milliseconds(delay) is not None:
@@ -118,6 +136,114 @@ class CallRecorder:
         if item.role == "assistant":
             self._transcript.append(self._turn("agent", text, item.created_at))
             self._add_turn_metric(item.metrics)
+
+    # The caller started speaking. Remember it only when the agent is also speaking.
+    def _on_user_state(self, ev: UserStateChangedEvent) -> None:
+        if ev.new_state != "speaking":
+            if (
+                ev.new_state == "listening"
+                and self._open_interruption is not None
+                and self._open_interruption["agentStoppedAt"] is None
+            ):
+                self._open_interruption = None
+            return
+        if self._session is None or self._session.agent_state != "speaking":
+            return
+        if self._open_interruption is not None:
+            return
+        self._begin_interruption(ev.created_at)
+
+    # The adaptive detector says this overlap is a real interruption.
+    def _on_overlap(self, ev: OverlappingSpeechEvent) -> None:
+        if ev.is_interruption is not True:
+            return
+        if self._session is None or self._session.agent_state != "speaking":
+            return
+        if self._open_interruption is not None:
+            return
+        self._begin_interruption(ev.overlap_started_at)
+
+    # Start one interruption from a SDK timestamp. None stays null.
+    def _begin_interruption(self, started_at: object) -> None:
+        started = unix_stamp(started_at)
+        self._open_interruption = {
+            "callerStartedAt": started,
+            "agentStoppedAt": None,
+            "timeToQuietMs": None,
+            "kind": None,
+            "_caller_unix": None if started is None else float(started_at),
+            "_stopped_unix": None,
+        }
+
+    # The agent left speaking. That event time is when the SDK stopped the audio.
+    def _on_agent_state(self, ev: AgentStateChangedEvent) -> None:
+        open_row = self._open_interruption
+        if open_row is None:
+            return
+        if ev.old_state != "speaking" or ev.new_state == "speaking":
+            return
+        if open_row["_stopped_unix"] is not None:
+            return
+        stopped = unix_stamp(ev.created_at)
+        open_row["agentStoppedAt"] = stopped
+        if stopped is None:
+            return
+        open_row["_stopped_unix"] = float(ev.created_at)
+        if open_row["_caller_unix"] is None:
+            return
+        open_row["timeToQuietMs"] = milliseconds(
+            float(ev.created_at) - open_row["_caller_unix"]
+        )
+
+    # The SDK says the pause was a false interruption. resumed=True means the agent continued.
+    def _on_false_interruption(self, ev: AgentFalseInterruptionEvent) -> None:
+        open_row = self._open_interruption
+        if open_row is None:
+            return
+        if ev.resumed is True:
+            open_row["kind"] = "false_resumed"
+        self._finish_interruption()
+
+    # A saved caller line means the agent stayed quiet and the interruption was real.
+    def _mark_real_interruption(self) -> None:
+        open_row = self._open_interruption
+        if open_row is None or open_row["agentStoppedAt"] is None or open_row["kind"] is not None:
+            return
+        open_row["kind"] = "real"
+        self._finish_interruption()
+
+    # Store the open interruption and print it. Drop private timing fields first.
+    def _finish_interruption(self) -> None:
+        open_row = self._open_interruption
+        self._open_interruption = None
+        if open_row is None:
+            return
+        row = {
+            "callerStartedAt": open_row["callerStartedAt"],
+            "agentStoppedAt": open_row["agentStoppedAt"],
+            "timeToQuietMs": open_row["timeToQuietMs"],
+            "kind": open_row["kind"],
+        }
+        self._interruptions.append(row)
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        print(
+            f"{stamp} interruption kind={row['kind']} "
+            f"callerStartedAt={row['callerStartedAt']} "
+            f"agentStoppedAt={row['agentStoppedAt']} "
+            f"timeToQuietMs={row['timeToQuietMs']}"
+        )
+
+    # Close an interruption that was still open when the call ended.
+    def _flush_open_interruption(self) -> None:
+        open_row = self._open_interruption
+        if open_row is None:
+            return
+        if open_row["agentStoppedAt"] is None and open_row["kind"] is None:
+            self._open_interruption = None
+            return
+        if open_row["kind"] is None and open_row["agentStoppedAt"] is not None:
+            open_row["kind"] = "real"
+        self._finish_interruption()
 
     # Build one transcript row with the time and how far into the call it happened.
     def _turn(self, role: str, text: str, created_at: float) -> dict[str, Any]:
@@ -202,6 +328,7 @@ class CallRecorder:
     def finish(self, ev: CloseEvent | None) -> None:
         if self._finished:
             return
+        self._flush_open_interruption()
         self._finished = True
         self._ended_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self._duration_seconds = round(time.monotonic() - self._started_mono, 3)
@@ -245,6 +372,7 @@ class CallRecorder:
             "endedAt": self._ended_at,
             "durationSeconds": self._duration_seconds,
             "hangupReason": self._hangup_reason,
+            "interruptions": self._interruptions,
         }
 
     # Start saving when the session closes. The job shutdown waits for this task.

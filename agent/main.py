@@ -16,6 +16,15 @@ from tools import build_http_tool
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+# How the caller can interrupt the agent. These names are the LiveKit 1.8.13
+# interruption options. There is no option to ignore particular words.
+INTERRUPTION_CONFIG = {
+    "min_duration": 0.4,
+    "min_words": 2,
+    "resume_false_interruption": True,
+    "false_interruption_timeout": 2.0,
+}
+
 CALL_CONFIG = {
     "greeting": "Hi, this is Bright Smile Dental. How can I help?",
     "maxDurationSeconds": 600,
@@ -240,7 +249,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         llm=groq.LLM(model="openai/gpt-oss-20b", reasoning_effort="low"),
         tts=cartesia.TTS(),
         vad=ctx.proc.userdata["vad"],
-        turn_handling=TurnHandlingOptions(turn_detection=MultilingualModel()),
+        turn_handling=TurnHandlingOptions(
+            turn_detection=MultilingualModel(),
+            interruption=INTERRUPTION_CONFIG,
+        ),
         user_away_timeout=None,
     )
     watch = CallLifecycle(session, lifecycle_config)

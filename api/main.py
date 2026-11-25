@@ -94,6 +94,13 @@ class TurnMetricResult(BaseModel):
     usedTool: bool
 
 
+class InterruptionResult(BaseModel):
+    callerStartedAt: str | None = None
+    agentStoppedAt: str | None = None
+    timeToQuietMs: int | float | None = None
+    kind: Literal["real", "false_resumed"] | None = None
+
+
 class CallResultRequest(BaseModel):
     transcript: list[TranscriptTurn]
     toolCalls: list[ToolCallResult]
@@ -105,6 +112,7 @@ class CallResultRequest(BaseModel):
     hangupReason: Literal[
         "goodbye", "inactivity", "max_duration", "caller_disconnected", "api_end"
     ] | None = None
+    interruptions: list[InterruptionResult] = Field(default_factory=list)
 
 
 class CreateCallRequest(BaseModel):
