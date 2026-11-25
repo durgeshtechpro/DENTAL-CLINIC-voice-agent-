@@ -1,0 +1,13 @@
+.venv
+.env
+.env.*
+web/
+node_modules
+.git
+__pycache__
+data/call-logs
+*.db
+*.log
+secrets.env
+clinic/
+api/

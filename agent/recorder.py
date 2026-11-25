@@ -416,15 +416,45 @@ class CallRecorder:
         except Exception as exc:
             log_save_error(exc)
 
-    # Send the result to the call API. Raises when the API does not accept it.
+    # Print one result-upload attempt. Do not print the API key.
+    def _log_result_attempt(
+        self, attempt: int, status: int | None, error: BaseException | None
+    ) -> None:
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if error is None:
+            print(f"{stamp} call result attempt={attempt} status={status}")
+            return
+        print(
+            f"{stamp} call result attempt={attempt} status={status} "
+            f"error={type(error).__name__}"
+        )
+
+    # Send the result to the call API. Two retries, then the caller writes the file.
     async def _post(self, payload: dict[str, Any]) -> None:
         url = f"{api_base_url()}/calls/{self.call_id}/result"
         headers = {"X-API-Key": os.environ.get("API_KEY", "")}
         client = await get_http_client()
-        response = await client.post(
-            url, headers=headers, json=payload, timeout=httpx.Timeout(5.0)
-        )
-        response.raise_for_status()
+        waits = (2, 5)
+        last_error: Exception | None = None
+        for attempt in range(1, len(waits) + 2):
+            if attempt > 1:
+                await asyncio.sleep(waits[attempt - 2])
+            try:
+                response = await client.post(
+                    url, headers=headers, json=payload, timeout=httpx.Timeout(30.0)
+                )
+                response.raise_for_status()
+            except Exception as exc:
+                last_error = exc
+                status = None
+                if isinstance(exc, httpx.HTTPStatusError):
+                    status = exc.response.status_code
+                self._log_result_attempt(attempt, status, exc)
+                continue
+            self._log_result_attempt(attempt, response.status_code, None)
+            return
+        if last_error is not None:
+            raise last_error
 
     # Write the result JSON into data/call-logs.
     def _write(self, payload: dict[str, Any], name: str) -> None:

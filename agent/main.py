@@ -1,27 +1,56 @@
+import asyncio
 import json
 import os
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+import httpx
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import Agent, AgentServer, AgentSession, JobProcess, TurnHandlingOptions
 from livekit.plugins import cartesia, deepgram, groq, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+# The script folder must be importable for both local console runs and the container.
+_AGENT_DIR = Path(__file__).resolve().parent
+if str(_AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(_AGENT_DIR))
+
 from http_client import get_http_client, open_http_client
 from lifecycle import CallLifecycle, end_call, log_call
-from recorder import CallRecorder
+from recorder import CallRecorder, api_base_url
 from tools import build_http_tool
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+# A missing .env is normal in the cloud. Skip it instead of failing startup.
+_ENV_FILE = _AGENT_DIR.parent / ".env"
+if _ENV_FILE.is_file():
+    load_dotenv(_ENV_FILE)
 
 
 # The clinic address, or the local clinic when the variable is empty.
 def clinic_base_url() -> str:
     base = os.environ.get("CLINIC_BASE_URL", "").strip().rstrip("/")
     return base or "http://127.0.0.1:8001"
+
+
+# Ask one service to wake up. Failures stay inside this task.
+async def _wake_one(url: str) -> None:
+    try:
+        client = await get_http_client()
+        await client.get(url, timeout=httpx.Timeout(60.0))
+    except Exception:
+        return
+
+
+# Start the clinic and API waking up without delaying the greeting.
+def wake_backends() -> None:
+    try:
+        asyncio.create_task(_wake_one(f"{clinic_base_url()}/health"))
+        asyncio.create_task(_wake_one(f"{api_base_url()}/health"))
+    except Exception:
+        return
 
 
 # How the caller can interrupt the agent. These names are the LiveKit 1.8.13
@@ -251,6 +280,7 @@ class Assistant(Agent):
 
 # Open one voice session, then speak the greeting before the caller talks.
 async def entrypoint(ctx: agents.JobContext) -> None:
+    wake_backends()
     await get_http_client()
     instructions, greeting, lifecycle_config, tools = settings_from_room(ctx)
     session = AgentSession(
