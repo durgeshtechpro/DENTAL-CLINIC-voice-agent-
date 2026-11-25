@@ -24,8 +24,13 @@ from livekit.agents.voice.events import (
 )
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "call-logs"
-RESULT_URL = "http://127.0.0.1:8000/calls/{call_id}/result"
 HANGUP_REASONS = {"goodbye", "inactivity", "max_duration"}
+
+
+# The call API address, or the local API when the variable is empty.
+def api_base_url() -> str:
+    base = os.environ.get("API_BASE_URL", "").strip().rstrip("/")
+    return base or "http://127.0.0.1:8000"
 
 
 # Turn a SDK unix time into a UTC timestamp, or None when the SDK did not give one.
@@ -413,7 +418,7 @@ class CallRecorder:
 
     # Send the result to the call API. Raises when the API does not accept it.
     async def _post(self, payload: dict[str, Any]) -> None:
-        url = RESULT_URL.format(call_id=self.call_id)
+        url = f"{api_base_url()}/calls/{self.call_id}/result"
         headers = {"X-API-Key": os.environ.get("API_KEY", "")}
         client = await get_http_client()
         response = await client.post(

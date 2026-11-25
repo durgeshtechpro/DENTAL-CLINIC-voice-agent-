@@ -1,9 +1,23 @@
+import os
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).resolve().parent / "clinic.db"
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+# Folder for clinic.db, or the clinic folder when DATA_DIR is empty.
+def database_path() -> Path:
+    folder = os.environ.get("DATA_DIR", "").strip()
+    if folder:
+        return Path(folder) / "clinic.db"
+    return Path(__file__).resolve().parent / "clinic.db"
+
+
+DB_PATH = database_path()
 OPEN_TIMES = ("09:00", "10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00")
 SEED_DAYS = 14
 

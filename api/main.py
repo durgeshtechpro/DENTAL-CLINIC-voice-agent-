@@ -170,11 +170,36 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await close_webhook_client()
 
 
+# Browser origins from CORS_ORIGINS, or the local web app when it is empty.
+def allowed_origins() -> list[str]:
+    raw = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
+    origins = [part.strip() for part in raw.split(",") if part.strip()]
+    if not origins:
+        return ["http://localhost:3000"]
+    return origins
+
+
+# The listen port from PORT, or 8000 when it is missing or not a valid port.
+def listen_port() -> int:
+    raw = os.environ.get("PORT", "").strip()
+    if not raw:
+        return 8000
+    try:
+        port = int(raw)
+    except ValueError:
+        print(f"PORT={raw} is not a number. Using 8000.")
+        return 8000
+    if port < 1 or port > 65535:
+        print(f"PORT={port} is out of range. Using 8000.")
+        return 8000
+    return port
+
+
 app = FastAPI(title="Call API", lifespan=lifespan)
 app.add_exception_handler(ApiError, api_error_handler)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -326,3 +351,10 @@ async def save_call_result(
 @app.get("/calls", dependencies=[Depends(require_api_key)])
 async def read_calls() -> list[dict[str, Any]]:
     return list_calls()
+
+
+# Start the API. The uvicorn command still defaults to port 8000 on its own.
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=listen_port())

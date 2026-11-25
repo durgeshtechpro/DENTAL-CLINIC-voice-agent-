@@ -1,12 +1,26 @@
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from api.cost import compute_cost
 
-DB_PATH = Path(__file__).resolve().parent / "calls.db"
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+# Folder for calls.db, or the api folder when DATA_DIR is empty.
+def database_path() -> Path:
+    folder = os.environ.get("DATA_DIR", "").strip()
+    if folder:
+        return Path(folder) / "calls.db"
+    return Path(__file__).resolve().parent / "calls.db"
+
+
+DB_PATH = database_path()
 
 
 # Open the calls database and wait briefly if another write holds the lock.

@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,13 @@ from recorder import CallRecorder
 from tools import build_http_tool
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+# The clinic address, or the local clinic when the variable is empty.
+def clinic_base_url() -> str:
+    base = os.environ.get("CLINIC_BASE_URL", "").strip().rstrip("/")
+    return base or "http://127.0.0.1:8001"
+
 
 # How the caller can interrupt the agent. These names are the LiveKit 1.8.13
 # interruption options. There is no option to ignore particular words.
@@ -51,7 +59,7 @@ TOOL_CONFIGS = [
         },
         "http": {
             "method": "POST",
-            "url": "http://127.0.0.1:8001/slots",
+            "url": f"{clinic_base_url()}/slots",
             "timeoutMs": 4000,
         },
     },
@@ -76,7 +84,7 @@ TOOL_CONFIGS = [
         },
         "http": {
             "method": "POST",
-            "url": "http://127.0.0.1:8001/book",
+            "url": f"{clinic_base_url()}/book",
             "timeoutMs": 4000,
         },
     },
