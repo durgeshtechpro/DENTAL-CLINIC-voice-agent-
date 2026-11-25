@@ -1,0 +1,27 @@
+{
+  "currency": "USD",
+  "usdToInr": null,
+  "rates": {
+    "telephony": {
+      "perMinute": 0,
+      "note": "LiveKit/SIP minutes"
+    },
+    "stt": {
+      "perAudioMinute": 0,
+      "note": "Deepgram"
+    },
+    "llm": {
+      "perMillionPromptTokens": 0,
+      "perMillionCompletionTokens": 0,
+      "note": "Groq"
+    },
+    "tts": {
+      "perMillionCharacters": 0,
+      "note": "Cartesia"
+    },
+    "server": {
+      "perMinute": 0,
+      "note": "hosting share"
+    }
+  }
+}

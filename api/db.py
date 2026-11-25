@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from api.cost import compute_cost
+
 DB_PATH = Path(__file__).resolve().parent / "calls.db"
 
 
@@ -31,7 +33,9 @@ def init_db() -> None:
                 started_at TEXT,
                 ended_at TEXT,
                 duration_seconds REAL,
-                result_json TEXT
+                result_json TEXT,
+                cost_json TEXT,
+                webhook_attempts_json TEXT
             )
             """
         )
@@ -42,6 +46,10 @@ def init_db() -> None:
             connection.execute("ALTER TABLE calls ADD COLUMN duration_seconds REAL")
         if "result_json" not in columns:
             connection.execute("ALTER TABLE calls ADD COLUMN result_json TEXT")
+        if "cost_json" not in columns:
+            connection.execute("ALTER TABLE calls ADD COLUMN cost_json TEXT")
+        if "webhook_attempts_json" not in columns:
+            connection.execute("ALTER TABLE calls ADD COLUMN webhook_attempts_json TEXT")
     finally:
         connection.close()
 
@@ -70,6 +78,38 @@ def row_to_call(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+# Read the stored cost, or price the result when an older row has no cost yet.
+def stored_cost(row: sqlite3.Row, result: dict[str, Any] | None) -> dict[str, Any] | None:
+    raw = row["cost_json"]
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+    if result is None:
+        return None
+    try:
+        return compute_cost(result)
+    except Exception:
+        return None
+
+
+# Read the webhook tries saved for this call.
+def stored_attempts(row: sqlite3.Row) -> list[dict[str, Any]]:
+    raw = row["webhook_attempts_json"]
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
 # Turn one database row into the full call, including the transcript when it exists.
 def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
     result = stored_result(row)
@@ -79,6 +119,8 @@ def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
     detail["turnMetrics"] = None if result is None else result.get("turnMetrics")
     detail["usage"] = None if result is None else result.get("usage")
     detail["hangupReason"] = None if result is None else result.get("hangupReason")
+    detail["cost"] = stored_cost(row, result)
+    detail["webhookAttempts"] = stored_attempts(row)
     return detail
 
 
@@ -169,8 +211,10 @@ def room_name_for(call_id: str) -> str | None:
     return str(row["room_name"])
 
 
-# Store the call result and mark the call completed.
-def save_result(call_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
+# Store the call result and its cost, and mark the call completed.
+def save_result(
+    call_id: str, result: dict[str, Any], cost: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     if get_call(call_id) is None:
         return None
     connection = connect()
@@ -184,7 +228,8 @@ def save_result(call_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
                     started_at = ?,
                     ended_at = ?,
                     duration_seconds = ?,
-                    result_json = ?
+                    result_json = ?,
+                    cost_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -192,6 +237,7 @@ def save_result(call_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
                     result.get("endedAt"),
                     result.get("durationSeconds"),
                     json.dumps(result),
+                    None if cost is None else json.dumps(cost),
                     call_id,
                 ),
             )
@@ -202,6 +248,38 @@ def save_result(call_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
     finally:
         connection.close()
     return get_call(call_id)
+
+
+# Add one webhook try to the call. The list stays in the order the tries happened.
+def append_webhook_attempt(call_id: str, attempt: dict[str, Any]) -> None:
+    connection = connect()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = connection.execute(
+                "SELECT webhook_attempts_json FROM calls WHERE id = ?",
+                (call_id,),
+            ).fetchone()
+            if row is None:
+                connection.execute("ROLLBACK")
+                return
+            current: list[dict[str, Any]] = []
+            raw = row["webhook_attempts_json"]
+            if raw:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    current = [item for item in parsed if isinstance(item, dict)]
+            current.append(attempt)
+            connection.execute(
+                "UPDATE calls SET webhook_attempts_json = ? WHERE id = ?",
+                (json.dumps(current), call_id),
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+    finally:
+        connection.close()
 
 
 # Remove a call when room setup fails before the caller receives it.

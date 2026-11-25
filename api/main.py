@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import secrets
@@ -8,12 +9,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from livekit import api
 from pydantic import BaseModel, Field, model_validator
 
+from api.cost import compute_cost
 from api.db import (
     delete_call,
     get_call,
@@ -23,6 +25,13 @@ from api.db import (
     mark_ended,
     room_name_for,
     save_result,
+)
+from api.webhook import (
+    close_webhook_client,
+    deliver_webhook,
+    log_webhook,
+    open_webhook_client,
+    webhook_url_from,
 )
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -148,7 +157,9 @@ def _error(status_code: int, message: str) -> JSONResponse:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_db()
+    await asyncio.to_thread(open_webhook_client)
     yield
+    await close_webhook_client()
 
 
 app = FastAPI(title="Call API", lifespan=lifespan)
@@ -283,12 +294,23 @@ async def end_call(call_id: str) -> JSONResponse:
     return JSONResponse(status_code=200, content=updated)
 
 
-# Save the transcript and metrics collected for one call.
+# Save the transcript and metrics, then send the webhook after the response.
 @app.post("/calls/{call_id}/result", dependencies=[Depends(require_api_key)])
-async def save_call_result(call_id: str, body: CallResultRequest) -> JSONResponse:
-    updated = save_result(call_id, body.model_dump())
+async def save_call_result(
+    call_id: str, body: CallResultRequest, background: BackgroundTasks
+) -> JSONResponse:
+    result = body.model_dump()
+    try:
+        cost = compute_cost(result)
+    except Exception:
+        cost = compute_cost({})
+    updated = save_result(call_id, result, cost)
     if updated is None:
         return _error(404, "not found")
+    url = webhook_url_from(updated.get("config"))
+    if url:
+        background.add_task(deliver_webhook, call_id, url, result, cost)
+        log_webhook(f"webhook scheduled call_id={call_id}")
     return JSONResponse(status_code=200, content=updated)
 
 
