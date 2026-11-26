@@ -320,6 +320,16 @@ class CallRecorder:
         )
         self._used_tool = True
 
+    # Every finished line in order, as role and text. Roles are "user" or "agent".
+    def turns(self) -> list[tuple[str, str]]:
+        turns: list[tuple[str, str]] = []
+        for row in self._transcript:
+            role = str(row.get("role") or "")
+            text = str(row.get("text") or "").strip()
+            if role in {"user", "agent"} and text:
+                turns.append((role, text))
+        return turns
+
     # The caller's last few finished lines, oldest first.
     def recent_caller_lines(self, limit: int = 6) -> list[str]:
         lines = [
@@ -464,6 +474,21 @@ class CallRecorder:
             stamp = datetime.now(timezone.utc).strftime("%H%M%S%f")
             path = LOG_DIR / f"{path.stem}-{stamp}{path.suffix}"
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+# The recorded lines for this call, oldest first. Empty when no recorder is attached.
+def call_turns(session: AgentSession) -> list[tuple[str, str]]:
+    try:
+        watch = session.userdata
+    except Exception:
+        return []
+    recorder = getattr(watch, "recorder", None)
+    if not isinstance(recorder, CallRecorder):
+        return []
+    try:
+        return recorder.turns()
+    except Exception:
+        return []
 
 
 # The caller's recent finished lines from the recorder on this session.

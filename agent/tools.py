@@ -9,7 +9,7 @@ from livekit.agents import RunContext, function_tool
 from livekit.agents.llm import RawFunctionTool
 
 from http_client import get_http_client
-from recorder import recent_caller_lines, report_tool_call
+from recorder import call_turns, recent_caller_lines, report_tool_call
 
 FILLER_PHRASES = (
     "Let me check that for you.",
@@ -35,6 +35,25 @@ REPEATED_MISMATCH = {
 }
 # Name of the field on the call object that remembers the last wrong phone.
 _REJECT_FIELD = "_rejected_phone"
+# Caller words that accept the number the agent just read back.
+_YES_PHRASES = (
+    "that's right",
+    "that is right",
+    "go ahead",
+    "confirmed",
+    "exactly",
+    "correct",
+    "yeah",
+    "yep",
+    "yup",
+    "yes",
+    "sure",
+    "okay",
+    "right",
+    "ok",
+)
+# Words that mean the caller did not accept the number.
+_NO_WORDS = ("incorrect", "wrong", "not", "wait", "no")
 _DIGIT_WORDS = {
     "zero": "0",
     "oh": "0",
@@ -257,14 +276,84 @@ def phone_block(
         "note": (
             "You sent a phone number that does not match what the caller said. "
             f"The caller's number appears to be {spaced}. "
-            "Read exactly these digits back to the caller one by one, and wait for a yes. "
+            "Read it back and wait for yes. "
             "Then call book_slot again using exactly these digits."
         ),
     }
 
 
+# Lowercase the line and turn punctuation into spaces.
+def _plain_words(text: str) -> str:
+    cleaned = text.lower().replace("\u2019", "'").replace("`", "'")
+    letters: list[str] = []
+    for ch in cleaned:
+        if ch.isalnum() or ch in {"'", " "}:
+            letters.append(ch)
+        else:
+            letters.append(" ")
+    return " ".join("".join(letters).split())
+
+
+# True when the phrase is its own words inside the line.
+def _has_phrase(spoken: str, phrase: str) -> bool:
+    start = 0
+    while True:
+        index = spoken.find(phrase, start)
+        if index < 0:
+            return False
+        before_ok = index == 0 or spoken[index - 1] == " "
+        after = index + len(phrase)
+        after_ok = after == len(spoken) or spoken[after] == " "
+        if before_ok and after_ok:
+            return True
+        start = index + 1
+
+
+# True when this caller line accepts a number and does not take it back.
+def _caller_said_yes(text: str) -> bool:
+    spoken = _plain_words(text)
+    if not spoken or any(_has_phrase(spoken, word) for word in _NO_WORDS):
+        return False
+    return any(_has_phrase(spoken, phrase) for phrase in _YES_PHRASES)
+
+
+# Print a booking-confirmation decision. Only the last 4 digits are logged.
+def log_confirmation(decision: str, phone: str) -> None:
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    print(f"{stamp} book_slot {decision} phone_last4={phone[-4:]}")
+
+
+# Block book_slot until the agent read these digits and the caller later said yes.
+def confirmation_gate(ctx: RunContext, phone: str) -> dict[str, str] | None:
+    turns = call_turns(ctx.session) if phone else []
+    read_at: int | None = None
+    for index, (role, text) in enumerate(turns):
+        if role == "agent" and phone in spoken_digits(text):
+            read_at = index
+    if read_at is not None:
+        later = [text for role, text in turns[read_at + 1 :] if role == "user"]
+        if any(_caller_said_yes(text) for text in later):
+            newest = _plain_words(later[-1]) if later else ""
+            taken_back = any(_has_phrase(newest, word) for word in _NO_WORDS)
+            if not taken_back:
+                log_confirmation("confirmed", phone)
+                return None
+    log_confirmation("confirmation_required", phone)
+    spaced = " ".join(phone)
+    return {
+        "status": "confirmation_required",
+        "phone": phone,
+        "note": (
+            "Read this phone number back to the caller digit by digit right now: "
+            f"{spaced}. Wait for the caller to say yes. Then call book_slot again "
+            "with exactly these digits. If the caller says no, ask them to repeat "
+            "the number slowly."
+        ),
+    }
+
+
 # Stop a bad booking before the clinic is called.
-# Order: name, then the same rejected phone, then the phone check.
+# Order: name, then the same rejected phone, then the phone check, then read-back confirmation.
 def booking_block(
     ctx: RunContext, tool_name: str, raw_arguments: dict[str, Any]
 ) -> dict[str, str] | None:
@@ -276,7 +365,12 @@ def booking_block(
         if repeated_phone(ctx, cleaned):
             log_reject(tool_name, "repeated_mismatch", str(raw_arguments.get("phone") or ""))
             return dict(REPEATED_MISMATCH)
-    return phone_block(ctx, tool_name, raw_arguments)
+    blocked = phone_block(ctx, tool_name, raw_arguments)
+    if blocked is not None:
+        return blocked
+    if tool_name != "book_slot" or "phone" not in raw_arguments:
+        return None
+    return confirmation_gate(ctx, clean_phone(str(raw_arguments.get("phone") or "")))
 
 
 # Turn one config dict into a LiveKit tool that POSTs the model's arguments.

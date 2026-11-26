@@ -137,6 +137,7 @@ def front_desk_instructions() -> str:
         "If a booking fails because the slot is taken, say so and offer the alternatives. "
         "Phone numbers have 10 digits. 'double N' means N twice and 'triple N' means N three times. "
         "Before calling book_slot, read the phone number back digit by digit (for example: eight, three, seven, four, zero, one, one, six, three, four) and wait for the caller to say yes. Do not call book_slot before that yes. "
+        "When the caller gives a phone number, always read it back digit by digit and wait for yes before calling book_slot. If a tool says confirmation_required, do exactly that. "
         "Call end_call only after the caller clearly says goodbye or that they need nothing else. Never call it while you are waiting for information from the caller. "
         "If end_call returns a note asking you to confirm, speak the question immediately and wait for the answer, then call end_call again if the caller agrees. Never stay silent after a tool returns a note. "
         "If a tool returns an error or mismatch, ALWAYS speak a short sentence to the caller before doing anything else. Never stay silent."
@@ -284,7 +285,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await get_http_client()
     instructions, greeting, lifecycle_config, tools = settings_from_room(ctx)
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3", language="en"),
+        stt=deepgram.STT(model="nova-3", language="en", numerals=True),
         llm=groq.LLM(model="openai/gpt-oss-20b", reasoning_effort="low"),
         tts=cartesia.TTS(),
         vad=ctx.proc.userdata["vad"],
