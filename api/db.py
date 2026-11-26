@@ -124,14 +124,19 @@ def stored_attempts(row: sqlite3.Row) -> list[dict[str, Any]]:
     return [item for item in parsed if isinstance(item, dict)]
 
 
-# Read saved interruptions, or an empty list when the result has none.
-def stored_interruptions(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+# Read a saved list of free-form objects, keeping every field on each object.
+def stored_objects(result: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
     if not isinstance(result, dict):
         return []
-    raw = result.get("interruptions")
+    raw = result.get(key)
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]
+
+
+# Read saved interruptions, or an empty list when the result has none.
+def stored_interruptions(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    return stored_objects(result, "interruptions")
 
 
 # Turn one database row into the full call, including the transcript when it exists.
@@ -140,7 +145,7 @@ def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
     detail = row_to_call(row)
     detail["transcript"] = None if result is None else result.get("transcript")
     detail["toolCalls"] = None if result is None else result.get("toolCalls")
-    detail["turnMetrics"] = None if result is None else result.get("turnMetrics")
+    detail["turnMetrics"] = None if result is None else stored_objects(result, "turnMetrics")
     detail["usage"] = None if result is None else result.get("usage")
     detail["hangupReason"] = None if result is None else result.get("hangupReason")
     detail["interruptions"] = stored_interruptions(result)

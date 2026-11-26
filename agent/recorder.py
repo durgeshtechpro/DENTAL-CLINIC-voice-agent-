@@ -11,7 +11,7 @@ from livekit import rtc
 
 from http_client import get_http_client
 from livekit.agents import AgentSession, ChatMessage
-from livekit.agents.metrics import EOUMetrics, LLMMetrics, STTMetrics, TTSMetrics
+from livekit.agents.metrics import LLMMetrics, STTMetrics, TTSMetrics
 from livekit.agents.inference.interruption import OverlappingSpeechEvent
 from livekit.agents.voice.events import (
     AgentFalseInterruptionEvent,
@@ -47,11 +47,19 @@ def milliseconds(seconds: object) -> int | None:
     return int(round(float(seconds) * 1000))
 
 
-# Use a metric from this chat message when the SDK stored it, otherwise the fallback.
-def metric_or(metrics: dict[str, Any], key: str, fallback: float | None) -> float | None:
+# Read one ChatMessage.metrics field. None when the SDK did not report it.
+def metric_ms(metrics: dict[str, Any], key: str) -> int | None:
     if key not in metrics:
-        return fallback
-    return None if milliseconds(metrics[key]) is None else float(metrics[key])
+        return None
+    return milliseconds(metrics[key])
+
+
+# Sum tool-log durations for this reply. None when this reply ran no timed tool.
+def _tool_duration_ms(tools: list[tuple[str, int | None]]) -> int | None:
+    known = [duration for _name, duration in tools if duration is not None]
+    if not known:
+        return None
+    return sum(known)
 
 
 # Make one value safe to store as JSON.
@@ -88,11 +96,9 @@ class CallRecorder:
         self._llm_prompt_tokens = 0
         self._llm_completion_tokens = 0
         self._tts_characters = 0
-        self._pending_eou: float | None = None
-        self._pending_ttft: float | None = None
-        self._pending_ttfb: float | None = None
-        self._user_end_of_turn: float | None = None
-        self._used_tool = False
+        self._user_transcription_ms: int | None = None
+        self._user_end_of_turn_ms: int | None = None
+        self._turn_tools: list[tuple[str, int | None]] = []
         self._room_deleted = False
         self._session: AgentSession | None = None
         self._finished = False
@@ -133,10 +139,9 @@ class CallRecorder:
         if item.role == "user":
             self._transcript.append(self._turn("user", text, item.created_at))
             self._mark_real_interruption()
-            if "end_of_turn_delay" in item.metrics:
-                delay = item.metrics["end_of_turn_delay"]
-                if milliseconds(delay) is not None:
-                    self._user_end_of_turn = float(delay)
+            user_metrics = item.metrics if isinstance(item.metrics, dict) else {}
+            self._user_transcription_ms = metric_ms(user_metrics, "transcription_delay")
+            self._user_end_of_turn_ms = metric_ms(user_metrics, "end_of_turn_delay")
             return
         if item.role == "assistant":
             self._transcript.append(self._turn("agent", text, item.created_at))
@@ -258,43 +263,53 @@ class CallRecorder:
 
     # Keep one latency row for this agent reply, using only numbers the SDK reported.
     def _add_turn_metric(self, metrics: dict[str, Any]) -> None:
-        end_delay = self._pending_eou if self._pending_eou is not None else self._user_end_of_turn
-        llm_ttft = metric_or(metrics, "llm_node_ttft", self._pending_ttft)
-        tts_ttfb = metric_or(metrics, "tts_node_ttfb", self._pending_ttfb)
-        total = metric_or(metrics, "e2e_latency", None)
-        self._turn_metrics.append(
-            {
-                "turnIndex": len(self._turn_metrics),
-                "endOfTurnDelayMs": milliseconds(end_delay),
-                "llmTtftMs": milliseconds(llm_ttft),
-                "ttsTtfbMs": milliseconds(tts_ttfb),
-                "totalMs": milliseconds(total),
-                "usedTool": self._used_tool,
-            }
-        )
-        self._pending_eou = None
-        self._pending_ttft = None
-        self._pending_ttfb = None
-        self._user_end_of_turn = None
-        self._used_tool = False
+        tools = self._turn_tools
+        self._turn_tools = []
+        names = [name for name, _duration in tools]
+        if "lookup_faq" in names:
+            kind = "kb"
+        elif names:
+            kind = "tool"
+        else:
+            kind = "plain"
+        reported = metrics if isinstance(metrics, dict) else {}
+        row: dict[str, Any] = {
+            "turnIndex": len(self._turn_metrics),
+            "kind": kind,
+            "transcriptionDelayMs": self._user_transcription_ms,
+            "endOfTurnDelayMs": self._user_end_of_turn_ms,
+            "llmTtftMs": metric_ms(reported, "llm_node_ttft"),
+            "ttsTtfbMs": metric_ms(reported, "tts_node_ttfb"),
+            "e2eLatencyMs": metric_ms(reported, "e2e_latency"),
+            "toolDurationMs": _tool_duration_ms(tools),
+        }
+        self._user_transcription_ms = None
+        self._user_end_of_turn_ms = None
+        if row["e2eLatencyMs"] is None:
+            present = [
+                row[key]
+                for key in (
+                    "transcriptionDelayMs",
+                    "endOfTurnDelayMs",
+                    "llmTtftMs",
+                    "ttsTtfbMs",
+                    "toolDurationMs",
+                )
+                if row[key] is not None
+            ]
+            row["derived"] = True
+            row["derivedTotalMs"] = sum(present) if present else None
+        self._turn_metrics.append(row)
 
-    # Add usage totals and the latency numbers from one SDK metrics event.
+    # Add token, character, and audio totals from one SDK usage event.
     def _on_metrics(self, ev: MetricsCollectedEvent) -> None:
         metric = ev.metrics
-        if isinstance(metric, EOUMetrics):
-            if milliseconds(metric.end_of_utterance_delay) is not None:
-                self._pending_eou = metric.end_of_utterance_delay
-            return
         if isinstance(metric, LLMMetrics):
             self._llm_prompt_tokens += metric.prompt_tokens
             self._llm_completion_tokens += metric.completion_tokens
-            if milliseconds(metric.ttft) is not None:
-                self._pending_ttft = metric.ttft
             return
         if isinstance(metric, TTSMetrics):
             self._tts_characters += metric.characters_count
-            if milliseconds(metric.ttfb) is not None:
-                self._pending_ttfb = metric.ttfb
             return
         if isinstance(metric, STTMetrics):
             if milliseconds(metric.audio_duration) is not None:
@@ -318,7 +333,10 @@ class CallRecorder:
                 "timestamp": stamp,
             }
         )
-        self._used_tool = True
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)) or duration_ms < 0:
+            self._turn_tools.append((name, None))
+            return
+        self._turn_tools.append((name, int(round(duration_ms))))
 
     # Every finished line in order, as role and text. Roles are "user" or "agent".
     def turns(self) -> list[tuple[str, str]]:

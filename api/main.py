@@ -85,26 +85,10 @@ class ToolCallResult(BaseModel):
     timestamp: str
 
 
-class TurnMetricResult(BaseModel):
-    turnIndex: int = Field(ge=0)
-    endOfTurnDelayMs: float | None = None
-    llmTtftMs: float | None = None
-    ttsTtfbMs: float | None = None
-    totalMs: float | None = None
-    usedTool: bool
-
-
-class InterruptionResult(BaseModel):
-    callerStartedAt: str | None = None
-    agentStoppedAt: str | None = None
-    timeToQuietMs: int | float | None = None
-    kind: Literal["real", "false_resumed"] | None = None
-
-
 class CallResultRequest(BaseModel):
     transcript: list[TranscriptTurn]
     toolCalls: list[ToolCallResult]
-    turnMetrics: list[TurnMetricResult]
+    turnMetrics: list[dict[str, Any]]
     usage: UsageResult
     startedAt: str = Field(min_length=1)
     endedAt: str = Field(min_length=1)
@@ -112,7 +96,7 @@ class CallResultRequest(BaseModel):
     hangupReason: Literal[
         "goodbye", "inactivity", "max_duration", "caller_disconnected", "api_end"
     ] | None = None
-    interruptions: list[InterruptionResult] = Field(default_factory=list)
+    interruptions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CreateCallRequest(BaseModel):
