@@ -54,9 +54,14 @@ def metric_ms(metrics: dict[str, Any], key: str) -> int | None:
     return milliseconds(metrics[key])
 
 
-# Sum tool-log durations for this reply. None when this reply ran no timed tool.
-def _tool_duration_ms(tools: list[tuple[str, int | None]]) -> int | None:
-    known = [duration for _name, duration in tools if duration is not None]
+# Sum durations of clinic attempts in this reply, including timeouts and
+# connection errors. None when this reply never tried the clinic.
+def _tool_duration_ms(tools: list[tuple[str, int | None, bool]]) -> int | None:
+    known = [
+        duration
+        for _name, duration, http_called in tools
+        if http_called and duration is not None
+    ]
     if not known:
         return None
     return sum(known)
@@ -98,7 +103,7 @@ class CallRecorder:
         self._tts_characters = 0
         self._user_transcription_ms: int | None = None
         self._user_end_of_turn_ms: int | None = None
-        self._turn_tools: list[tuple[str, int | None]] = []
+        self._turn_tools: list[tuple[str, int | None, bool]] = []
         self._room_deleted = False
         self._session: AgentSession | None = None
         self._finished = False
@@ -265,7 +270,7 @@ class CallRecorder:
     def _add_turn_metric(self, metrics: dict[str, Any]) -> None:
         tools = self._turn_tools
         self._turn_tools = []
-        names = [name for name, _duration in tools]
+        names = [name for name, _duration, _http_called in tools]
         if "lookup_faq" in names:
             kind = "kb"
         elif names:
@@ -315,15 +320,22 @@ class CallRecorder:
             if milliseconds(metric.audio_duration) is not None:
                 self._stt_audio_seconds += metric.audio_duration
 
-    # Record one HTTP tool call reported by the tool itself.
+    # Record one tool call, including whether a clinic request was really sent.
     def add_tool_call(
         self,
         name: str,
         arguments: Any,
         result: Any,
         duration_ms: int,
+        http_called: bool,
+        outcome: str,
     ) -> None:
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # A guard or end_call never reached the clinic. A timeout or a connection
+        # error is still an attempt, so it stays in the turn total.
+        sent = http_called is True or outcome in {"ok", "timeout", "unavailable", "http_error"}
+        if name == "end_call" or outcome == "guard_blocked":
+            sent = False
         self._tool_calls.append(
             {
                 "name": name,
@@ -331,12 +343,18 @@ class CallRecorder:
                 "result": json_ready(result),
                 "durationMs": duration_ms,
                 "timestamp": stamp,
+                "httpCalled": sent,
+                "outcome": outcome,
             }
         )
-        if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)) or duration_ms < 0:
-            self._turn_tools.append((name, None))
+        if (
+            isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, (int, float))
+            or duration_ms < 0
+        ):
+            self._turn_tools.append((name, None, sent))
             return
-        self._turn_tools.append((name, int(round(duration_ms))))
+        self._turn_tools.append((name, int(round(duration_ms)), sent))
 
     # Every finished line in order, as role and text. Roles are "user" or "agent".
     def turns(self) -> list[tuple[str, str]]:
@@ -531,6 +549,8 @@ def report_tool_call(
     arguments: Any,
     result: Any,
     duration_ms: int,
+    http_called: bool,
+    outcome: str,
 ) -> None:
     try:
         watch = session.userdata
@@ -540,6 +560,8 @@ def report_tool_call(
     if not isinstance(recorder, CallRecorder):
         return
     try:
-        recorder.add_tool_call(name, arguments, result, duration_ms)
+        recorder.add_tool_call(
+            name, arguments, result, duration_ms, http_called, outcome
+        )
     except Exception:
         return

@@ -53,6 +53,14 @@ def wake_backends() -> None:
         return
 
 
+# How long the agent waits after the caller goes quiet. LiveKit 1.8.13 names
+# these min_delay and max_delay. The defaults are 0.5 and 3.0 seconds.
+# A lower maximum answers faster, but it may cut off a caller who pauses mid-sentence.
+ENDPOINTING_CONFIG = {
+    "min_delay": 0.5,
+    "max_delay": 1.5,
+}
+
 # How the caller can interrupt the agent. These names are the LiveKit 1.8.13
 # interruption options. There is no option to ignore particular words.
 INTERRUPTION_CONFIG = {
@@ -291,6 +299,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         vad=ctx.proc.userdata["vad"],
         turn_handling=TurnHandlingOptions(
             turn_detection=MultilingualModel(),
+            endpointing=ENDPOINTING_CONFIG,
             interruption=INTERRUPTION_CONFIG,
         ),
         user_away_timeout=None,

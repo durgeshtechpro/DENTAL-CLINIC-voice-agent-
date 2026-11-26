@@ -12,6 +12,8 @@ from livekit.agents.voice.agent_session import AgentSession
 from livekit.agents.voice.events import ConversationItemAddedEvent
 from livekit.agents.voice.speech_handle import SpeechHandle
 
+from recorder import report_tool_call
+
 MAX_DURATION_GOODBYE = (
     "I'm sorry, we have reached the time limit for this call. Goodbye."
 )
@@ -262,21 +264,29 @@ class CallLifecycle:
     ),
 )
 async def end_call(ctx: RunContext) -> str | None:
+    started = time.perf_counter()
     watch: CallLifecycle | None = ctx.session.userdata
     if not isinstance(watch, CallLifecycle):
-        return "The call cannot be ended right now."
+        note = "The call cannot be ended right now."
+        _record_end_call(ctx, started, "guard_blocked", note)
+        return note
     if watch.closing or ctx.session.user_state == "speaking":
-        return "The caller is still speaking. Do not end the call."
+        note = "The caller is still speaking. Do not end the call."
+        _record_end_call(ctx, started, "guard_blocked", note)
+        return note
     utterance = _latest_user_text(ctx.session)
     if not _caller_said_goodbye(ctx.session) and not watch.end_confirmed:
         watch.pending_end_confirmation = True
         watch.end_confirmed = False
         _log_guard("rejected", utterance)
+        _record_end_call(ctx, started, "guard_blocked", NOT_GOODBYE_NOTE)
         return NOT_GOODBYE_NOTE
     try:
         ctx.speech_handle.allow_interruptions = False
     except RuntimeError:
-        return "The caller is still speaking. Do not end the call."
+        note = "The caller is still speaking. Do not end the call."
+        _record_end_call(ctx, started, "guard_blocked", note)
+        return note
 
     def _on_done(handle: SpeechHandle) -> None:
         asyncio.create_task(_finish_end_call(ctx, watch, handle))
@@ -285,7 +295,16 @@ async def end_call(ctx: RunContext) -> str | None:
     watch.pending_end_confirmation = False
     watch.end_confirmed = False
     _log_guard("allowed", utterance)
+    _record_end_call(ctx, started, "ok", None)
     return None
+
+
+# Save end_call on the tool log. This tool never calls the clinic.
+def _record_end_call(
+    ctx: RunContext, started: float, outcome: str, result: str | None
+) -> None:
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    report_tool_call(ctx.session, "end_call", {}, result, max(0, duration_ms), False, outcome)
 
 
 # Print one end_call guard decision with the caller's words.

@@ -144,7 +144,7 @@ def row_to_call_detail(row: sqlite3.Row) -> dict[str, Any]:
     result = stored_result(row)
     detail = row_to_call(row)
     detail["transcript"] = None if result is None else result.get("transcript")
-    detail["toolCalls"] = None if result is None else result.get("toolCalls")
+    detail["toolCalls"] = None if result is None else stored_objects(result, "toolCalls")
     detail["turnMetrics"] = None if result is None else stored_objects(result, "turnMetrics")
     detail["usage"] = None if result is None else result.get("usage")
     detail["hangupReason"] = None if result is None else result.get("hangupReason")

@@ -158,8 +158,66 @@ def format_ms(value: float) -> str:
     return f"{value:.1f}"
 
 
+# Durations of clinic requests only. Guard blocks and end_call are left out.
+def http_tool_durations(calls: list[dict[str, Any]], group: str) -> list[float]:
+    values: list[float] = []
+    for call in calls:
+        raw = call.get("toolCalls")
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict) or item.get("httpCalled") is not True:
+                continue
+            name = str(item.get("name") or "")
+            if group == "plain":
+                continue
+            if group == "kb" and name != "lookup_faq":
+                continue
+            if group == "tool" and name == "lookup_faq":
+                continue
+            value = item.get("durationMs")
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            values.append(float(value))
+    return values
+
+
+# How many clinic requests timed out, out of how many were really sent.
+def timeout_line(calls: list[dict[str, Any]]) -> str:
+    http_calls = 0
+    timeouts = 0
+    for call in calls:
+        raw = call.get("toolCalls")
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict) or item.get("httpCalled") is not True:
+                continue
+            http_calls += 1
+            if item.get("outcome") == "timeout":
+                timeouts += 1
+    return f"Tool timeouts: {timeouts} of {http_calls} HTTP tool calls"
+
+
+# Timeouts plus clinic-unavailable attempts, out of the same HTTP calls.
+def failure_line(calls: list[dict[str, Any]]) -> str:
+    http_calls = 0
+    failures = 0
+    for call in calls:
+        raw = call.get("toolCalls")
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict) or item.get("httpCalled") is not True:
+                continue
+            http_calls += 1
+            if item.get("outcome") in {"timeout", "unavailable"}:
+                failures += 1
+    return f"Tool failures (timeout + unavailable): {failures} of {http_calls}"
+
+
 # One markdown table. n is how many non-null values that row used.
-def render_table(turns: list[dict[str, Any]]) -> str:
+def render_table(turns: list[dict[str, Any]], calls: list[dict[str, Any]]) -> str:
     lines = [
         "| group | component | n | median ms | p95 ms |",
         "| --- | --- | ---: | ---: | ---: |",
@@ -167,7 +225,10 @@ def render_table(turns: list[dict[str, Any]]) -> str:
     for group in GROUPS:
         grouped = [turn for turn in turns if in_group(turn, group)]
         for component in COMPONENTS:
-            values = component_values(grouped, component)
+            if component == "toolDurationMs":
+                values = http_tool_durations(calls, group)
+            else:
+                values = component_values(grouped, component)
             if not values:
                 lines.append(f"| {group} | {component} | 0 |  |  |")
                 continue
@@ -206,8 +267,8 @@ def render_report(calls: list[dict[str, Any]], turns: list[dict[str, Any]]) -> s
     ]
     if warning:
         parts.extend([warning, ""])
-    parts.append(render_table(turns))
-    parts.append("")
+    parts.append(render_table(turns, calls))
+    parts.extend(["", timeout_line(calls), failure_line(calls), ""])
     return "\n".join(parts)
 
 

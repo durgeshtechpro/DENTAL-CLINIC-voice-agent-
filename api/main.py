@@ -83,6 +83,8 @@ class ToolCallResult(BaseModel):
     result: Any = None
     durationMs: float = Field(ge=0)
     timestamp: str
+    httpCalled: bool
+    outcome: Literal["ok", "timeout", "unavailable", "http_error", "guard_blocked"]
 
 
 class CallResultRequest(BaseModel):

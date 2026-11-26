@@ -385,9 +385,13 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
     async def call_tool(ctx: RunContext, raw_arguments: dict[str, Any]) -> str:
         started = time.perf_counter()
         blocked = booking_block(ctx, config["name"], raw_arguments)
+        http_called = False
         if blocked is not None:
             payload: Any = blocked
+            outcome = "guard_blocked"
         else:
+            outcome = "unavailable"
+            http_called = True
             try:
                 await ctx.session.say(random.choice(FILLER_PHRASES))
                 started = time.perf_counter()
@@ -401,12 +405,14 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
                 )
                 if response.status_code == 200:
                     payload = response.json()
+                    outcome = "ok"
                 elif response.status_code == 409:
                     payload = response.json()
                     if isinstance(payload, dict):
                         payload["note"] = TAKEN_NOTE
                     else:
                         payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
+                    outcome = "unavailable"
                 elif response.status_code == 422:
                     payload = response.json()
                     if isinstance(payload, dict) and payload.get("status") == "invalid_input":
@@ -417,12 +423,16 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
                         )
                     else:
                         payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
+                    outcome = "http_error"
                 else:
                     payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
+                    outcome = "http_error"
             except httpx.TimeoutException:
                 payload = {"error": "timeout", "note": TIMEOUT_NOTE}
+                outcome = "timeout"
             except Exception:
                 payload = {"error": "unavailable", "note": UNAVAILABLE_NOTE}
+                outcome = "unavailable"
 
         text = json.dumps(payload)
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -431,7 +441,15 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
             f"{stamp} tool={config['name']} args={json.dumps(raw_arguments)} "
             f"result={text} duration_ms={duration_ms}"
         )
-        report_tool_call(ctx.session, config["name"], raw_arguments, payload, duration_ms)
+        report_tool_call(
+            ctx.session,
+            config["name"],
+            raw_arguments,
+            payload,
+            duration_ms,
+            http_called,
+            outcome,
+        )
         return text
 
     return function_tool(call_tool, raw_schema=schema)
