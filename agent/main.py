@@ -21,7 +21,7 @@ if str(_AGENT_DIR) not in sys.path:
 from http_client import get_http_client, open_http_client
 from lifecycle import CallLifecycle, end_call, log_call
 from recorder import CallRecorder, api_base_url
-from tools import build_http_tool
+from tools import build_http_tool, build_lookup_faq
 
 # A missing .env is normal in the cloud. Skip it instead of failing startup.
 _ENV_FILE = _AGENT_DIR.parent / ".env"
@@ -72,6 +72,7 @@ INTERRUPTION_CONFIG = {
 
 CALL_CONFIG = {
     "greeting": "Hi, this is Bright Smile Dental. How can I help?",
+    "knowledgeBase": "clinic-faq",
     "maxDurationSeconds": 600,
     "inactivity": {
         "afterSeconds": 8,
@@ -148,7 +149,8 @@ def front_desk_instructions() -> str:
         "When the caller gives a phone number, always read it back digit by digit and wait for yes before calling book_slot. If a tool says confirmation_required, do exactly that. "
         "Call end_call only after the caller clearly says goodbye or that they need nothing else. Never call it while you are waiting for information from the caller. "
         "If end_call returns a note asking you to confirm, speak the question immediately and wait for the answer, then call end_call again if the caller agrees. Never stay silent after a tool returns a note. "
-        "If a tool returns an error or mismatch, ALWAYS speak a short sentence to the caller before doing anything else. Never stay silent."
+        "If a tool returns an error or mismatch, ALWAYS speak a short sentence to the caller before doing anything else. Never stay silent. "
+        "For any question about opening hours, prices, location, parking, insurance, payments, policies or services, call lookup_faq and answer only from its result. Never answer such questions from memory. Never read the whole text; answer in one or two short sentences. Say prices as 'rupees', hours like 'nine AM to six PM'."
     )
 
 
@@ -217,6 +219,43 @@ def usable_tool(item: object) -> dict[str, Any] | None:
     return item
 
 
+# The FAQ file for this call. Missing or null uses clinic-faq. Only "" turns it off.
+def knowledge_base_name(config: dict[str, Any] | None) -> str | None:
+    default = str(CALL_CONFIG["knowledgeBase"])
+    if config is None or "knowledgeBase" not in config:
+        return default
+    value = config.get("knowledgeBase")
+    if value is None or not isinstance(value, str):
+        return default
+    if value == "":
+        return None
+    cleaned = value.strip()
+    if cleaned == "":
+        return None
+    return cleaned
+
+
+# HTTP tools, the FAQ tool when a knowledge base is selected, then end_call.
+def tools_for(http_tools: list[Any], kb_name: str | None) -> list[Any]:
+    chosen = list(http_tools)
+    if kb_name:
+        faq = build_lookup_faq(kb_name)
+        if faq is not None:
+            chosen.append(faq)
+    chosen.append(end_call)
+    return chosen
+
+
+# Add the FAQ rule once when this call can look answers up.
+def with_faq_rule(instructions: str, kb_name: str | None) -> str:
+    if not kb_name or "lookup_faq" in instructions:
+        return instructions
+    return (
+        instructions.rstrip()
+        + " For any question about opening hours, prices, location, parking, insurance, payments, policies or services, call lookup_faq and answer only from its result. Never answer such questions from memory. Never read the whole text; answer in one or two short sentences. Say prices as 'rupees', hours like 'nine AM to six PM'."
+    )
+
+
 # Use the room config when it is valid, and the built-in defaults otherwise.
 def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any], list[Any]]:
     instructions = front_desk_instructions()
@@ -225,7 +264,7 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
         "maxDurationSeconds": CALL_CONFIG["maxDurationSeconds"],
         "inactivity": dict(CALL_CONFIG["inactivity"]),
     }
-    tools: list[Any] = [*TOOLS, end_call]
+    tools = tools_for(TOOLS, knowledge_base_name(None))
     try:
         raw = room_metadata(ctx).strip()
         if not raw:
@@ -257,6 +296,7 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
                 merged["message"] = message
             if float(merged["hangUpAfterSeconds"]) >= float(merged["afterSeconds"]):
                 lifecycle["inactivity"] = merged
+        http_tools: list[Any] = list(TOOLS)
         if isinstance(config.get("tools"), list):
             built: list[Any] = []
             for item in config["tools"]:
@@ -267,7 +307,10 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
                     built.append(build_http_tool(tool_config))
                 except Exception:
                     continue
-            tools = [*built, end_call]
+            http_tools = built
+        kb_name = knowledge_base_name(config)
+        instructions = with_faq_rule(instructions, kb_name)
+        tools = tools_for(http_tools, kb_name)
     except Exception:
         return (
             front_desk_instructions(),
@@ -276,7 +319,7 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
                 "maxDurationSeconds": CALL_CONFIG["maxDurationSeconds"],
                 "inactivity": dict(CALL_CONFIG["inactivity"]),
             },
-            [*TOOLS, end_call],
+            tools_for(TOOLS, knowledge_base_name(None)),
         )
     return instructions, greeting, lifecycle, tools
 

@@ -54,13 +54,12 @@ def metric_ms(metrics: dict[str, Any], key: str) -> int | None:
     return milliseconds(metrics[key])
 
 
-# Sum durations of clinic attempts in this reply, including timeouts and
-# connection errors. None when this reply never tried the clinic.
+# Sum clinic attempts and FAQ lookups in this reply. None when neither ran.
 def _tool_duration_ms(tools: list[tuple[str, int | None, bool]]) -> int | None:
     known = [
         duration
-        for _name, duration, http_called in tools
-        if http_called and duration is not None
+        for name, duration, http_called in tools
+        if duration is not None and (http_called or name == "lookup_faq")
     ]
     if not known:
         return None
@@ -331,22 +330,30 @@ class CallRecorder:
         outcome: str,
     ) -> None:
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        # A guard or end_call never reached the clinic. A timeout or a connection
-        # error is still an attempt, so it stays in the turn total.
-        sent = http_called is True or outcome in {"ok", "timeout", "unavailable", "http_error"}
-        if name == "end_call" or outcome == "guard_blocked":
+        # A guard, end_call, or local FAQ lookup never called the clinic.
+        # A timeout or a connection error is still an attempt.
+        local = name == "lookup_faq"
+        if local or name == "end_call" or outcome == "guard_blocked":
             sent = False
-        self._tool_calls.append(
-            {
-                "name": name,
-                "arguments": json_ready(arguments),
-                "result": json_ready(result),
-                "durationMs": duration_ms,
-                "timestamp": stamp,
-                "httpCalled": sent,
-                "outcome": outcome,
+        else:
+            sent = http_called is True or outcome in {
+                "ok",
+                "timeout",
+                "unavailable",
+                "http_error",
             }
-        )
+        stored: dict[str, Any] = {
+            "name": name,
+            "arguments": json_ready(arguments),
+            "result": json_ready(result),
+            "durationMs": duration_ms,
+            "timestamp": stamp,
+            "httpCalled": sent,
+            "outcome": outcome,
+        }
+        if local:
+            stored["local"] = True
+        self._tool_calls.append(stored)
         if (
             isinstance(duration_ms, bool)
             or not isinstance(duration_ms, (int, float))

@@ -9,6 +9,7 @@ from livekit.agents import RunContext, function_tool
 from livekit.agents.llm import RawFunctionTool
 
 from http_client import get_http_client
+from kb import kb_file, search
 from recorder import call_turns, recent_caller_lines, report_tool_call
 
 FILLER_PHRASES = (
@@ -16,11 +17,20 @@ FILLER_PHRASES = (
     "One moment while I look that up.",
     "I'll check the schedule now.",
 )
+FAQ_FILLERS = (
+    "Let me look that up.",
+    "One moment, I'll check that.",
+    "I'll look that up for you.",
+)
 TAKEN_NOTE = "Tell the caller this slot is taken and offer these alternatives."
 TIMEOUT_NOTE = "The system is slow. Apologise briefly and offer to try again."
 UNAVAILABLE_NOTE = (
     "The system is not responding. Apologise and offer to try again "
     "or have the clinic call back."
+)
+NOT_FOUND_NOTE = (
+    "Tell the caller you do not have that information and offer to have "
+    "the clinic call back. Do not guess prices, hours or policies."
 )
 NAME_NOT_GIVEN = {
     "status": "name_not_given",
@@ -453,3 +463,63 @@ def build_http_tool(config: dict[str, Any]) -> RawFunctionTool:
         return text
 
     return function_tool(call_tool, raw_schema=schema)
+
+
+# Build the local FAQ tool for one knowledge-base file. None when that file is missing.
+def build_lookup_faq(kb_name: str) -> RawFunctionTool | None:
+    if kb_file(kb_name) is None:
+        return None
+    schema = {
+        "name": "lookup_faq",
+        "description": (
+            "Look up opening hours, prices, location, parking, insurance, "
+            "payments, policies, or services"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The caller's question in a short phrase",
+                },
+            },
+            "required": ["question"],
+        },
+    }
+
+    # Say a short filler, search the FAQ, and hand the model the matching sections.
+    async def lookup_faq(ctx: RunContext, raw_arguments: dict[str, Any]) -> str:
+        await ctx.session.say(random.choice(FAQ_FILLERS))
+        started = time.perf_counter()
+        question = str(raw_arguments.get("question") or "")
+        hits = search(question, top_k=2, kb_name=kb_name)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if hits:
+            sections = [{"title": hit["title"], "text": hit["text"]} for hit in hits]
+            payload: dict[str, Any] = {"status": "found", "sections": sections}
+            summary: dict[str, Any] = {
+                "status": "found",
+                "titles": [section["title"] for section in sections],
+            }
+            outcome = "ok"
+        else:
+            payload = {"status": "not_found", "note": NOT_FOUND_NOTE}
+            summary = {"status": "not_found", "titles": []}
+            outcome = "not_found"
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        print(
+            f"{stamp} tool=lookup_faq args={json.dumps(raw_arguments)} "
+            f"result={json.dumps(summary)} duration_ms={duration_ms}"
+        )
+        report_tool_call(
+            ctx.session,
+            "lookup_faq",
+            raw_arguments,
+            summary,
+            max(0, duration_ms),
+            False,
+            outcome,
+        )
+        return json.dumps(payload)
+
+    return function_tool(lookup_faq, raw_schema=schema)

@@ -158,7 +158,7 @@ def format_ms(value: float) -> str:
     return f"{value:.1f}"
 
 
-# Durations of clinic requests only. Guard blocks and end_call are left out.
+# Durations for one table group. FAQ lookups count only on the kb rows.
 def http_tool_durations(calls: list[dict[str, Any]], group: str) -> list[float]:
     values: list[float] = []
     for call in calls:
@@ -166,15 +166,19 @@ def http_tool_durations(calls: list[dict[str, Any]], group: str) -> list[float]:
         if not isinstance(raw, list):
             continue
         for item in raw:
-            if not isinstance(item, dict) or item.get("httpCalled") is not True:
+            if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "")
-            if group == "plain":
-                continue
-            if group == "kb" and name != "lookup_faq":
-                continue
-            if group == "tool" and name == "lookup_faq":
-                continue
+            if group == "kb":
+                if name != "lookup_faq":
+                    continue
+            else:
+                if item.get("httpCalled") is not True:
+                    continue
+                if group == "plain":
+                    continue
+                if group == "tool" and name == "lookup_faq":
+                    continue
             value = item.get("durationMs")
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue

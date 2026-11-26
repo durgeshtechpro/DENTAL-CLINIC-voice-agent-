@@ -13,7 +13,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from livekit import api
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.cost import compute_cost
 from api.db import (
@@ -77,14 +77,17 @@ class TranscriptTurn(BaseModel):
     offsetSeconds: float = Field(ge=0)
 
 
+# One tool call. Any outcome string is accepted, and extra keys are kept.
 class ToolCallResult(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="allow")
+
+    name: Any = None
     arguments: Any = None
     result: Any = None
-    durationMs: float = Field(ge=0)
-    timestamp: str
-    httpCalled: bool
-    outcome: Literal["ok", "timeout", "unavailable", "http_error", "guard_blocked"]
+    durationMs: Any = None
+    timestamp: Any = None
+    httpCalled: Any = None
+    outcome: str | None = None
 
 
 class CallResultRequest(BaseModel):
