@@ -2,7 +2,9 @@
 
 Bright Smile Dental front desk. A caller talks, the agent listens, checks or books a slot, looks up the clinic FAQ, and hangs up. Each call is saved with a transcript, tool log, latency, and a cost breakdown.
 
-The live demo today is a **browser call**. A real India phone call is not finished. The reason is in [REPORT.md](REPORT.md). The design note is [DESIGN.md](DESIGN.md).
+The live site is https://dental-clinic-voice-agent-six.vercel.app. The page has a landing, **Start call**, and a call dashboard at `/calls`. The language choice is English, Hindi, Tamil, and Telugu. English is the default.
+
+The live demo is a **browser call**. These are still open: a real India phone number, a new 30-turn latency run, a stored recording file, and the 5-minute video. The reason is in [REPORT.md](REPORT.md). The design note is [DESIGN.md](DESIGN.md).
 
 ## Run it locally
 
@@ -53,7 +55,7 @@ $env:API_KEY = "<the API key>"
 
 ## Cloud
 
-The agent runs on LiveKit Cloud (`python agent/main.py start`, region ap-south). The API and clinic run on Render. See [render.md](render.md). The web console runs on Vercel. Set the same environment variable names there. Do not put secret values in the repo.
+The voice agent is already deployed on LiveKit Cloud (`python agent/main.py start`, region ap-south). The site is on Vercel. The Vercel project root directory is `web`. The API and clinic run on Render. See [render.md](render.md). Set the same environment variable names there. Do not put secret values in the repo.
 
 ## What is in each folder
 
@@ -62,6 +64,6 @@ The agent runs on LiveKit Cloud (`python agent/main.py start`, region ap-south).
 | `agent/` | The voice agent, tools, FAQ, and call recorder |
 | `api/` | `POST /calls`, `GET /calls`, `GET /calls/{id}`, end, result, cost, webhook |
 | `clinic/` | Mock clinic slots. Booking the same slot twice fails |
-| `web/` | Browser call, call history, and call detail |
+| `web/` | Bright Smile desk: landing, Start call, dashboard, and language choice |
 | `scripts/` | Latency, cost, and export reports |
 | `data/` | Saved reports. Raw transcripts stay out of git |
