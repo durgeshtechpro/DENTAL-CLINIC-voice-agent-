@@ -35,6 +35,9 @@ api/calls.db
 # Saved call transcripts
 data/call-logs/
 
+# Raw call exports. data/calls-summary.md stays committable.
+data/call-exports/
+
 # Local notes
 memory_context.md
 

@@ -1,27 +1,11 @@
 {
   "currency": "USD",
-  "usdToInr": null,
+  "usdToInr": 94,
   "rates": {
-    "telephony": {
-      "perMinute": 0,
-      "note": "LiveKit/SIP minutes"
-    },
-    "stt": {
-      "perAudioMinute": 0,
-      "note": "Deepgram"
-    },
-    "llm": {
-      "perMillionPromptTokens": 0,
-      "perMillionCompletionTokens": 0,
-      "note": "Groq"
-    },
-    "tts": {
-      "perMillionCharacters": 0,
-      "note": "Cartesia"
-    },
-    "server": {
-      "perMinute": 0,
-      "note": "hosting share"
-    }
+    "telephony": {"perMinute": 0.0005, "note": "LiveKit WebRTC minute (browser calls). Phone via SIP: about 0.012"},
+    "stt": {"perAudioMinute": 0.0048, "note": "Deepgram Nova-3 monolingual streaming, pay as you go"},
+    "llm": {"perMillionPromptTokens": 0.075, "perMillionCompletionTokens": 0.30, "note": "Groq gpt-oss-20b"},
+    "tts": {"perMillionCharacters": 50, "note": "Cartesia Sonic, Pro plan effective rate"},
+    "server": {"perMinute": 0.01016, "note": "LiveKit agent session 0.01 plus about 0.00016 API and clinic hosting (assumption)"}
   }
 }
