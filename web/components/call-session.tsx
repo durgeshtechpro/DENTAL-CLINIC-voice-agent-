@@ -73,6 +73,7 @@ export function CallSession({ callId, onLeave }: CallSessionProps) {
   // Tell the API the call is over, then leave the room.
   async function endCall() {
     setEnding(true);
+    onLeave(null);
     let message: string | null = null;
     try {
       const response = await fetch(`/api/calls/${encodeURIComponent(callId)}/end`, {

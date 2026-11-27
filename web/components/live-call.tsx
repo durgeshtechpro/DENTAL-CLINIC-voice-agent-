@@ -7,6 +7,15 @@ import { CallSession } from "@/components/call-session";
 import { DeskShell } from "@/components/desk-shell";
 import "@livekit/components-styles";
 
+const LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "hi", label: "Hindi" },
+  { code: "ta", label: "Tamil" },
+  { code: "te", label: "Telugu" },
+] as const;
+
+type CallLanguage = (typeof LANGUAGES)[number]["code"];
+
 type StartedCall = {
   id: string;
   serverUrl: string;
@@ -47,6 +56,7 @@ function errorMessage(value: unknown, fallback: string): string {
 // Start a browser call, then show the live room inside the card.
 export function LiveCall() {
   const [call, setCall] = useState<StartedCall | null>(null);
+  const [language, setLanguage] = useState<CallLanguage>("en");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const leaving = useRef(false);
@@ -60,7 +70,7 @@ export function LiveCall() {
       const response = await fetch("/api/calls", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ language }),
       });
       let payload: unknown = null;
       try {
@@ -133,8 +143,8 @@ export function LiveCall() {
 
   return (
     <DeskShell
-      title="Live desk"
-      lede="Talk with the front desk from this browser. The phone trial is not required for this console."
+      title="Bright Smile"
+      lede="The front desk can book a visit, look up a price, and hang up when you are done. This browser call does not need a phone number."
       status={status}
     >
       <section className="rounded-3xl border border-[#e4dccf] bg-[#fffdf8] p-6 shadow-sm sm:p-8">
@@ -167,9 +177,34 @@ export function LiveCall() {
             />
           </LiveKitRoom>
         ) : (
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-6">
+            <div>
+              <p className="text-xs uppercase tracking-[0.16em] text-stone-500">Language</p>
+              <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Call language">
+                {LANGUAGES.map((item) => {
+                  const selected = language === item.code;
+                  return (
+                    <button
+                      key={item.code}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setLanguage(item.code)}
+                      className={
+                        selected
+                          ? "h-10 rounded-full bg-stone-950 px-4 text-sm text-stone-50"
+                          : "h-10 rounded-full border border-stone-300 bg-white px-4 text-sm text-stone-700 hover:bg-stone-50"
+                      }
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <p className="max-w-md text-sm leading-6 text-stone-600">
-              The agent greets first, checks the clinic book, and can hang up when the conversation is done.
+              {LANGUAGES.find((item) => item.code === language)?.label} is selected. Hindi, Tamil, and
+              Telugu are listed because Deepgram and Cartesia both support them.
             </p>
             <button
               type="button"
@@ -182,6 +217,7 @@ export function LiveCall() {
             >
               {connecting ? "Connecting..." : "Start call"}
             </button>
+            </div>
           </div>
         )}
       </section>

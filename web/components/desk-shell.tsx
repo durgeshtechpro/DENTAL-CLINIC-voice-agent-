@@ -19,7 +19,7 @@ function navClass(active: boolean): string {
   return "rounded-full px-4 py-2 text-sm text-stone-700 hover:bg-white";
 }
 
-// Mark Live or Register. This hook has to sit inside Suspense.
+// Mark Live or Dashboard. This hook has to sit inside Suspense.
 function DeskNav() {
   const path = usePathname();
   const onLive = path === "/";
@@ -30,9 +30,9 @@ function DeskNav() {
       <Link href="/" className={navClass(onLive)} aria-current={onLive ? "page" : undefined}>
         Live
       </Link>
-      <Link href="/calls" className={navClass(onRegister)} aria-current={onRegister ? "page" : undefined}>
-        Register
-      </Link>
+            <Link href="/calls" className={navClass(onRegister)} aria-current={onRegister ? "page" : undefined}>
+              Dashboard
+            </Link>
     </nav>
   );
 }

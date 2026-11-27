@@ -123,7 +123,7 @@ export function CallDetail({ id }: CallDetailProps) {
     <DeskShell title="Call record" lede={id} status={status}>
       <p className="mb-6 text-sm text-stone-600">
         <Link href="/calls" className="underline decoration-stone-400 underline-offset-4">
-          Back to the register
+          Back to the dashboard
         </Link>
       </p>
 

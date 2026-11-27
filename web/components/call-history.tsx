@@ -30,6 +30,11 @@ function callRow(value: unknown): CallRow | null {
   };
 }
 
+// A call is still open until it ends or the result is saved.
+function isOpen(status: string): boolean {
+  return status !== "completed" && status !== "ended";
+}
+
 // Show one short duration, or a dash when the call has not ended.
 function durationLabel(seconds: number | null): string {
   if (seconds === null) {
@@ -76,12 +81,28 @@ export function CallHistory() {
     };
   }, []);
 
+  const saved = rows?.length ?? 0;
+  const completed = rows?.filter((row) => row.status === "completed").length ?? 0;
+  const open = rows?.filter((row) => isOpen(row.status)).length ?? 0;
+
   return (
     <DeskShell
-      title="Call register"
-      lede="Every saved browser call. Open one for the transcript, the tools, and the cost."
-      status={error ? "Unavailable" : rows === null ? "Loading" : `${rows.length} saved`}
+      title="Dashboard"
+      lede="Saved browser calls. Open one for the transcript, the tools, and the cost."
+      status={error ? "Unavailable" : rows === null ? "Loading" : `${saved} saved`}
     >
+      <dl className="mb-6 grid grid-cols-3 gap-3">
+        {[
+          ["Saved", saved],
+          ["Completed", completed],
+          ["Still open", open],
+        ].map(([label, value]) => (
+          <div key={String(label)} className="rounded-2xl border border-[#e4dccf] bg-[#fffdf8] px-3 py-3">
+            <dt className="text-xs uppercase tracking-wide text-stone-500">{label}</dt>
+            <dd className="mt-1 font-serif text-3xl text-stone-950">{rows === null ? "—" : value}</dd>
+          </div>
+        ))}
+      </dl>
       {error ? (
         <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           {error}

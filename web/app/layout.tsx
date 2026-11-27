@@ -20,6 +20,9 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Bright Smile Desk",
   description: "Talk with the Bright Smile Dental front desk agent.",
+  icons: {
+    icon: "/icon.png",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

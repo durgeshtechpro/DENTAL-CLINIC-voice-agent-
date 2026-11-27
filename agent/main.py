@@ -70,6 +70,14 @@ INTERRUPTION_CONFIG = {
     "false_interruption_timeout": 2.0,
 }
 
+# Deepgram Nova-3 and Cartesia Sonic 3 both list these codes.
+CALL_LANGUAGES = {
+    "en": "English",
+    "hi": "Hindi",
+    "ta": "Tamil",
+    "te": "Telugu",
+}
+
 CALL_CONFIG = {
     "greeting": "Hi, this is Bright Smile Dental. How can I help?",
     "knowledgeBase": "clinic-faq",
@@ -256,10 +264,47 @@ def with_faq_rule(instructions: str, kb_name: str | None) -> str:
     )
 
 
+# Keep English unless the call asked for Hindi, Tamil, or Telugu.
+def call_language(config: dict[str, Any] | None) -> str:
+    if not isinstance(config, dict):
+        return "en"
+    value = config.get("language")
+    if not isinstance(value, str):
+        return "en"
+    code = value.strip().lower()
+    if code in CALL_LANGUAGES and code != "en":
+        return code
+    return "en"
+
+
+# Tell the agent which language to speak, without dropping the FAQ rule.
+def with_language_rule(instructions: str, language: str) -> str:
+    if language == "en":
+        return instructions
+    name = CALL_LANGUAGES[language]
+    return (
+        instructions.rstrip()
+        + f" The caller is speaking {name}. Answer only in {name}. "
+        + "For prices, hours, and policies, still call lookup_faq and answer only from its result."
+    )
+
+
+# A short greeting in the caller's language. English stays the built-in line.
+def greeting_for(language: str) -> str:
+    if language == "hi":
+        return "नमस्ते, ब्राइट स्माइल डेंटल से बोल रहा हूँ। मैं कैसे मदद करूँ?"
+    if language == "ta":
+        return "வணக்கம், பிரைட் ஸ்மைல் டென்டல். நான் எப்படி உதவலாம்?"
+    if language == "te":
+        return "నమస్కారం, బ్రైట్ స్మైల్ డెంటల్. నేను ఎలా సహాయం చేయగలను?"
+    return str(CALL_CONFIG["greeting"])
+
+
 # Use the room config when it is valid, and the built-in defaults otherwise.
-def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any], list[Any]]:
+def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any], list[Any], str]:
     instructions = front_desk_instructions()
-    greeting = str(CALL_CONFIG["greeting"])
+    language = "en"
+    greeting = greeting_for(language)
     lifecycle = {
         "maxDurationSeconds": CALL_CONFIG["maxDurationSeconds"],
         "inactivity": dict(CALL_CONFIG["inactivity"]),
@@ -268,11 +313,13 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
     try:
         raw = room_metadata(ctx).strip()
         if not raw:
-            return instructions, greeting, lifecycle, tools
+            return instructions, greeting, lifecycle, tools, language
         parsed = json.loads(raw)
         config = parsed.get("config") if isinstance(parsed, dict) else None
         if not isinstance(config, dict):
-            return instructions, greeting, lifecycle, tools
+            return instructions, greeting, lifecycle, tools, language
+        language = call_language(config)
+        greeting = greeting_for(language)
         prompt = config.get("systemPrompt")
         if isinstance(prompt, str) and prompt.strip():
             instructions = prompt
@@ -310,6 +357,7 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
             http_tools = built
         kb_name = knowledge_base_name(config)
         instructions = with_faq_rule(instructions, kb_name)
+        instructions = with_language_rule(instructions, language)
         tools = tools_for(http_tools, kb_name)
     except Exception:
         return (
@@ -320,8 +368,9 @@ def settings_from_room(ctx: agents.JobContext) -> tuple[str, str, dict[str, Any]
                 "inactivity": dict(CALL_CONFIG["inactivity"]),
             },
             tools_for(TOOLS, knowledge_base_name(None)),
+            "en",
         )
-    return instructions, greeting, lifecycle, tools
+    return instructions, greeting, lifecycle, tools, language
 
 
 class Assistant(Agent):
@@ -334,11 +383,11 @@ class Assistant(Agent):
 async def entrypoint(ctx: agents.JobContext) -> None:
     wake_backends()
     await get_http_client()
-    instructions, greeting, lifecycle_config, tools = settings_from_room(ctx)
+    instructions, greeting, lifecycle_config, tools, language = settings_from_room(ctx)
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3", language="en", numerals=True),
+        stt=deepgram.STT(model="nova-3", language=language, numerals=language == "en"),
         llm=groq.LLM(model="openai/gpt-oss-20b", reasoning_effort="low"),
-        tts=cartesia.TTS(),
+        tts=cartesia.TTS(language=language),
         vad=ctx.proc.userdata["vad"],
         turn_handling=TurnHandlingOptions(
             turn_detection=MultilingualModel(),
