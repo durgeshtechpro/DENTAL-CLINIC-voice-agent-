@@ -1,5 +1,10 @@
 import { forwardCall } from "@/lib/forward-call";
 
+// Return the saved call list. The API key stays on the server.
+export async function GET() {
+  return forwardCall("/calls", undefined, "GET");
+}
+
 // Start a browser call and return the room details from the call API.
 export async function POST(request: Request) {
   let body: Record<string, unknown> = {};

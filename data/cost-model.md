@@ -21,7 +21,7 @@ Averages below are per call minute (usage divided by those minutes).
 
 USD to INR in the file: 94. Used for this report: 94.
 
-- telephony: LiveKit WebRTC minute (browser calls). Phone via SIP: about 0.012
+- telephony: LiveKit WebRTC participant minute after the included allowance (livekit.com/pricing). The phone scenario in the cost script uses $0.012 as a combined assumption. LiveKit third-party SIP itself is $0.004 per minute on the Ship plan.
 - stt: Deepgram Nova-3 monolingual streaming, pay as you go
 - llm: Groq gpt-oss-20b
 - tts: Cartesia Sonic, Pro plan effective rate

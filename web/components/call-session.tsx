@@ -95,50 +95,53 @@ export function CallSession({ callId, onLeave }: CallSessionProps) {
   const agentMissing = agentLate && !seenAgent && !agent;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <RoomAudioRenderer />
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-slate-300" aria-live="polite">
-          Status: <span className="font-medium text-white">{label}</span>
-        </p>
-        <p className="font-mono text-sm text-slate-300" aria-label="Call duration">
-          {formatDuration(seconds)}
-        </p>
-      </div>
-      <div data-lk-theme="default" className="h-16 rounded-xl bg-slate-950 px-3">
-        <BarVisualizer
-          state={state}
-          track={audioTrack}
-          barCount={7}
-          aria-label="Agent audio"
-          className="h-16"
-        />
-      </div>
-      {agentMissing ? (
-        <p role="alert" className="rounded-lg bg-amber-950 px-3 py-2 text-sm text-amber-100">
-          Agent did not join, check that the agent worker is running
-        </p>
-      ) : null}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <button
-          {...buttonProps}
-          type="button"
-          aria-label={enabled ? "Mute microphone" : "Unmute microphone"}
-          className="h-11 flex-1 rounded-full border border-slate-600 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-        >
-          {enabled ? "Mute" : "Unmute"}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            void endCall();
-          }}
-          disabled={ending}
-          aria-label="End call"
-          className="h-11 flex-1 rounded-full bg-rose-600 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
-        >
-          End call
-        </button>
+      <div className="flex flex-col gap-5">
+        <div className="flex items-end justify-between gap-3">
+          <p className="font-serif text-3xl text-stone-950" aria-live="polite">
+            {label}
+          </p>
+          <p className="font-mono text-sm text-stone-600" aria-label="Call duration">
+            {formatDuration(seconds)}
+          </p>
+        </div>
+        <div className="desk-meter h-20 rounded-2xl border border-[#e4dccf] bg-[#f7f3ec] px-3">
+          <BarVisualizer
+            state={state}
+            track={audioTrack}
+            barCount={9}
+            aria-label="Agent audio"
+            className="h-20"
+          />
+        </div>
+        {agentMissing ? (
+          <p role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            Agent did not join, check that the agent worker is running
+          </p>
+        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            {...buttonProps}
+            type="button"
+            aria-label={enabled ? "Mute microphone" : "Unmute microphone"}
+            className="h-11 flex-1 rounded-full border border-stone-300 bg-white text-sm font-medium text-stone-900 hover:bg-stone-50 disabled:opacity-50"
+          >
+            {enabled ? "Mute" : "Unmute"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void endCall();
+            }}
+            disabled={ending}
+            aria-label="End call"
+            className="h-11 flex-1 rounded-full bg-[#7f2d2d] text-sm font-medium text-[#fffdf8] hover:bg-[#6a2424] disabled:opacity-50"
+          >
+            End call
+          </button>
+        </div>
+        <p className="font-mono text-xs text-stone-500">Call {callId}</p>
       </div>
       <TranscriptPanel />
     </div>

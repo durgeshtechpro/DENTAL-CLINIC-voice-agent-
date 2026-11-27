@@ -32,29 +32,37 @@ export function TranscriptPanel() {
   }, [scrollKey]);
 
   return (
-    <section aria-label="Live transcript" className="flex min-h-48 flex-col gap-2">
-      <h2 className="text-sm font-medium text-slate-300">Transcript</h2>
+    <section aria-label="Live transcript" className="flex min-h-64 flex-col gap-3">
+      <h2 className="font-serif text-2xl text-stone-950">Transcript</h2>
       <div
         ref={panelRef}
-        className="h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 p-3"
+        className="h-80 overflow-y-auto rounded-2xl border border-[#e4dccf] bg-[#f7f3ec] p-4"
       >
         {lines.length === 0 ? (
-          <p className="text-sm text-slate-500">Waiting for someone to speak.</p>
+          <p className="text-sm text-stone-500">Waiting for someone to speak.</p>
         ) : (
           <ol className="flex flex-col gap-3">
             {lines.map((line) => {
               const caller = line.participantInfo.identity === localParticipant.identity;
               return (
-                <li key={line.streamInfo.id} className="text-sm">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className={caller ? "text-sky-300" : "text-emerald-300"}>
-                      {caller ? "Caller" : "Agent"}
-                    </span>
-                    <time className="text-xs text-slate-500" dateTime={String(line.streamInfo.timestamp)}>
-                      {clockTime(line.streamInfo.timestamp)}
-                    </time>
+                <li key={line.streamInfo.id} className={caller ? "ml-6 sm:ml-10" : "mr-6 sm:mr-10"}>
+                  <div
+                    className={
+                      caller
+                        ? "rounded-2xl bg-white px-3 py-2 text-sm shadow-sm"
+                        : "rounded-2xl border-l-2 border-amber-800 bg-[#fffdf8] px-3 py-2 text-sm"
+                    }
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-xs uppercase tracking-wide text-stone-500">
+                        {caller ? "Caller" : "Agent"}
+                      </span>
+                      <time className="text-xs text-stone-400" dateTime={String(line.streamInfo.timestamp)}>
+                        {clockTime(line.streamInfo.timestamp)}
+                      </time>
+                    </div>
+                    <p className="mt-1 text-stone-900">{line.text}</p>
                   </div>
-                  <p className="mt-1 text-slate-100">{line.text}</p>
                 </li>
               );
             })}

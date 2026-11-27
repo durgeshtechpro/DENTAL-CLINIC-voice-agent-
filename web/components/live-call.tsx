@@ -4,6 +4,7 @@ import { LiveKitRoom } from "@livekit/components-react";
 import { MediaDeviceFailure } from "livekit-client";
 import { useCallback, useRef, useState } from "react";
 import { CallSession } from "@/components/call-session";
+import { DeskShell } from "@/components/desk-shell";
 import "@livekit/components-styles";
 
 type StartedCall = {
@@ -128,61 +129,62 @@ export function LiveCall() {
     setError("Could not connect to the call.");
   }, []);
 
-  return (
-    <main className="flex min-h-full flex-1 items-center justify-center bg-slate-950 px-4 py-10 text-slate-100">
-      <section className="w-full max-w-xl rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl sm:p-8">
-        <p className="text-sm text-sky-300">Bright Smile Dental</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-          Bright Smile Voice Console
-        </h1>
-        <p className="mt-2 text-sm text-slate-400">
-          Start a browser call and talk with the front desk agent.
-        </p>
+  const status = call ? "On a call" : connecting ? "Connecting" : "Ready";
 
+  return (
+    <DeskShell
+      title="Live desk"
+      lede="Talk with the front desk from this browser. The phone trial is not required for this console."
+      status={status}
+    >
+      <section className="rounded-3xl border border-[#e4dccf] bg-[#fffdf8] p-6 shadow-sm sm:p-8">
         {error ? (
-          <p role="alert" className="mt-5 rounded-xl bg-rose-950 px-3 py-2 text-sm text-rose-100">
+          <p role="alert" className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
             {error}
           </p>
         ) : null}
 
         {call ? (
-          <div className="mt-6">
-            <LiveKitRoom
-              serverUrl={call.serverUrl}
-              token={call.participantToken}
-              connect
-              audio
-              video={false}
-              onDisconnected={handleDisconnected}
-              onMediaDeviceFailure={handleMediaFailure}
-              onError={handleRoomError}
-              className="flex flex-col"
-            >
-              <CallSession
-                callId={call.id}
-                onLeave={(message) => {
-                  leaving.current = true;
-                  if (message) {
-                    setError(message);
-                  }
-                }}
-              />
-            </LiveKitRoom>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              void startCall();
-            }}
-            disabled={connecting}
-            aria-label="Start call"
-            className="mt-6 h-12 w-full rounded-full bg-sky-500 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-8"
+          <LiveKitRoom
+            serverUrl={call.serverUrl}
+            token={call.participantToken}
+            connect
+            audio
+            video={false}
+            onDisconnected={handleDisconnected}
+            onMediaDeviceFailure={handleMediaFailure}
+            onError={handleRoomError}
+            className="flex flex-col"
           >
-            {connecting ? "Connecting..." : "Start call"}
-          </button>
+            <CallSession
+              callId={call.id}
+              onLeave={(message) => {
+                leaving.current = true;
+                if (message) {
+                  setError(message);
+                }
+              }}
+            />
+          </LiveKitRoom>
+        ) : (
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+            <p className="max-w-md text-sm leading-6 text-stone-600">
+              The agent greets first, checks the clinic book, and can hang up when the conversation is done.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                void startCall();
+              }}
+              disabled={connecting}
+              aria-label="Start call"
+              className="h-12 rounded-full bg-amber-800 px-8 text-sm font-semibold text-[#fffdf8] hover:bg-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {connecting ? "Connecting..." : "Start call"}
+            </button>
+          </div>
         )}
       </section>
-    </main>
+    </DeskShell>
   );
 }

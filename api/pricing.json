@@ -2,7 +2,7 @@
   "currency": "USD",
   "usdToInr": 94,
   "rates": {
-    "telephony": {"perMinute": 0.0005, "note": "LiveKit WebRTC minute (browser calls). Phone via SIP: about 0.012"},
+    "telephony": {"perMinute": 0.0005, "note": "LiveKit WebRTC participant minute after the included allowance (livekit.com/pricing). The phone scenario in the cost script uses $0.012 as a combined assumption. LiveKit third-party SIP itself is $0.004 per minute on the Ship plan."},
     "stt": {"perAudioMinute": 0.0048, "note": "Deepgram Nova-3 monolingual streaming, pay as you go"},
     "llm": {"perMillionPromptTokens": 0.075, "perMillionCompletionTokens": 0.30, "note": "Groq gpt-oss-20b"},
     "tts": {"perMillionCharacters": 50, "note": "Cartesia Sonic, Pro plan effective rate"},

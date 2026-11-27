@@ -41,5 +41,8 @@ data/call-exports/
 # Local notes
 memory_context.md
 
+# Personal review practice. Not part of the submission.
+INTERVIEW.md
+
 # Web frontend secrets
 web/.env.local
