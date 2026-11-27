@@ -151,7 +151,7 @@ export function CallDetail({ id }: CallDetailProps) {
               ["Tools", count(call.toolCalls)],
             ].map(([label, value]) => (
               <div key={String(label)} className="rounded-2xl border border-[#e4dccf] bg-[#fffdf8] px-3 py-3">
-                <dt className="text-xs uppercase tracking-wide text-stone-500">{label}</dt>
+                <dt className="text-xs uppercase tracking-wide text-stone-500">{String(label)}</dt>
                 <dd className="mt-1 text-sm text-stone-950">{text(value)}</dd>
               </div>
             ))}
